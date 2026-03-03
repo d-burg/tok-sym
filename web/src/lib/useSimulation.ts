@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { SimHandle, type PresetId } from './wasm'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SimHandle, type PresetId, getPreset } from './wasm'
 import type { Snapshot, TracePoint } from './types'
 
 const DT = 0.005 // 5 ms physics timestep
 const MAX_HISTORY = 2000 // ring buffer length (~10 s at 200 Hz display)
 
 export interface SimState {
-  snapshot: Snapshot | null
+  snapshot: Snapshot | null            // live (latest) snapshot
+  displaySnapshot: Snapshot | null     // scrubbed or live — for rendering components
   history: TracePoint[]
+  snapshotHistory: Snapshot[]          // full snapshots for scrub→equilibrium sync
   running: boolean
   wallJson: string
+  programJson: string                  // current discharge program JSON for target traces
+  scrubIndex: number | null            // null = live, number = index into snapshotHistory
+  finished: boolean                    // true when status is Complete or Disrupted
 }
 
 export interface SimControls {
@@ -17,6 +22,8 @@ export interface SimControls {
   pause: () => void
   reset: () => void
   switchPreset: (deviceId: string, preset: PresetId) => void
+  runProgram: (deviceId: string, programJson: string) => void
+  setScrubIndex: (index: number | null) => void
 }
 
 export function useSimulation(
@@ -25,18 +32,25 @@ export function useSimulation(
 ): [SimState, SimControls] {
   const simRef = useRef<SimHandle | null>(null)
   const historyRef = useRef<TracePoint[]>([])
+  const snapshotHistoryRef = useRef<Snapshot[]>([])
   const runningRef = useRef(false)
   const rafRef = useRef<number>(0)
   const wallJsonRef = useRef<string>('[]')
+  const programJsonRef = useRef<string>('{}')
 
   const [state, setState] = useState<SimState>({
     snapshot: null,
+    displaySnapshot: null,
     history: [],
+    snapshotHistory: [],
     running: false,
     wallJson: '[]',
+    programJson: '{}',
+    scrubIndex: null,
+    finished: false,
   })
 
-  // Create a new sim handle
+  // Create a new sim handle from a preset
   const createSim = useCallback((deviceId: string, preset: PresetId) => {
     // Clean up old handle
     if (simRef.current) {
@@ -45,13 +59,51 @@ export function useSimulation(
     const handle = SimHandle.from_preset(deviceId, preset)
     simRef.current = handle
     historyRef.current = []
+    snapshotHistoryRef.current = []
     wallJsonRef.current = handle.wall_outline_json()
+
+    // Get the program JSON for target traces
+    const program = getPreset(deviceId, preset)
+    programJsonRef.current = program ? JSON.stringify(program) : '{}'
+
     runningRef.current = false
     setState({
       snapshot: null,
+      displaySnapshot: null,
       history: [],
+      snapshotHistory: [],
       running: false,
       wallJson: wallJsonRef.current,
+      programJson: programJsonRef.current,
+      scrubIndex: null,
+      finished: false,
+    })
+  }, [])
+
+  // Create a new sim handle from custom program JSON
+  const createSimFromProgram = useCallback((deviceId: string, programJson: string) => {
+    // Clean up old handle
+    if (simRef.current) {
+      simRef.current.free()
+    }
+    const handle = new SimHandle(deviceId, programJson)
+    simRef.current = handle
+    historyRef.current = []
+    snapshotHistoryRef.current = []
+    wallJsonRef.current = handle.wall_outline_json()
+    programJsonRef.current = programJson
+
+    runningRef.current = false
+    setState({
+      snapshot: null,
+      displaySnapshot: null,
+      history: [],
+      snapshotHistory: [],
+      running: false,
+      wallJson: wallJsonRef.current,
+      programJson: programJsonRef.current,
+      scrubIndex: null,
+      finished: false,
     })
   }, [])
 
@@ -89,7 +141,7 @@ export function useSimulation(
     }
 
     if (snap) {
-      // Append to history ring buffer
+      // Append to trace history ring buffer
       const pt: TracePoint = {
         t: snap.time,
         ip: snap.ip,
@@ -102,17 +154,33 @@ export function useSimulation(
         d_alpha: snap.diagnostics.d_alpha,
         beta_n: snap.beta_n,
         disruption_risk: snap.disruption_risk,
+        li: snap.li,
+        q95: snap.q95,
+        v_loop: snap.diagnostics.v_loop,
       }
       historyRef.current.push(pt)
       if (historyRef.current.length > MAX_HISTORY) {
         historyRef.current = historyRef.current.slice(-MAX_HISTORY)
       }
 
+      // Append to full snapshot history (for scrubbing)
+      snapshotHistoryRef.current.push(snap)
+      if (snapshotHistoryRef.current.length > MAX_HISTORY) {
+        snapshotHistoryRef.current = snapshotHistoryRef.current.slice(-MAX_HISTORY)
+      }
+
+      const isFinished = snap.status === 'Complete' || snap.status === 'Disrupted'
+
       setState({
         snapshot: snap,
+        displaySnapshot: snap,
         history: historyRef.current,
+        snapshotHistory: snapshotHistoryRef.current,
         running: runningRef.current,
         wallJson: wallJsonRef.current,
+        programJson: programJsonRef.current,
+        scrubIndex: null,
+        finished: isFinished,
       })
     }
 
@@ -141,11 +209,16 @@ export function useSimulation(
       simRef.current.reset()
     }
     historyRef.current = []
+    snapshotHistoryRef.current = []
     setState((s) => ({
       ...s,
       snapshot: null,
+      displaySnapshot: null,
       history: [],
+      snapshotHistory: [],
       running: false,
+      scrubIndex: null,
+      finished: false,
     }))
   }, [])
 
@@ -157,5 +230,33 @@ export function useSimulation(
     [createSim],
   )
 
-  return [state, { start, pause, reset, switchPreset }]
+  const runProgram = useCallback(
+    (deviceId: string, programJson: string) => {
+      cancelAnimationFrame(rafRef.current)
+      createSimFromProgram(deviceId, programJson)
+    },
+    [createSimFromProgram],
+  )
+
+  const setScrubIndex = useCallback((index: number | null) => {
+    setState((prev) => {
+      const displaySnapshot =
+        index !== null && prev.snapshotHistory[index]
+          ? prev.snapshotHistory[index]
+          : prev.snapshot
+      return {
+        ...prev,
+        scrubIndex: index,
+        displaySnapshot,
+      }
+    })
+  }, [])
+
+  // Memoize controls to keep a stable reference
+  const controls = useMemo<SimControls>(
+    () => ({ start, pause, reset, switchPreset, runProgram, setScrubIndex }),
+    [start, pause, reset, switchPreset, runProgram, setScrubIndex],
+  )
+
+  return [state, controls]
 }

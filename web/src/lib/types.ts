@@ -89,4 +89,7 @@ export interface TracePoint {
   d_alpha: number
   beta_n: number
   disruption_risk: number
+  li: number
+  q95: number
+  v_loop: number
 }

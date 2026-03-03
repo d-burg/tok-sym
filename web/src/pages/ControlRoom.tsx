@@ -3,9 +3,9 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { useSimulation } from '../lib/useSimulation'
 import { getDevices, type PresetId } from '../lib/wasm'
 import EquilibriumCanvas from '../components/EquilibriumCanvas'
-import TimeTraces from '../components/TimeTraces'
-import DisruptionGauge from '../components/DisruptionGauge'
+import UnifiedTracePanel from '../components/UnifiedTracePanel'
 import StatusPanel from '../components/StatusPanel'
+import ShotPlanner from '../components/ShotPlanner'
 
 const PRESETS: { id: PresetId; label: string }[] = [
   { id: 'hmode', label: 'H-mode' },
@@ -21,14 +21,23 @@ export default function ControlRoom() {
   // Local state so user can switch without navigating
   const [activeDevice, setActiveDevice] = useState(routeDeviceId ?? 'diiid')
   const [activePreset, setActivePreset] = useState<PresetId>(routePreset)
+  const [showPlanner, setShowPlanner] = useState(false)
 
   const devices = useMemo(() => getDevices(), [])
 
   const [state, controls] = useSimulation(activeDevice, activePreset)
-  const { snapshot, history, running, wallJson } = state
+  const {
+    displaySnapshot,
+    history,
+    running,
+    wallJson,
+    programJson,
+    scrubIndex,
+    finished,
+  } = state
 
-  const time = snapshot?.time ?? 0
-  const duration = snapshot?.duration ?? 10
+  const time = displaySnapshot?.time ?? 0
+  const duration = displaySnapshot?.duration ?? 10
   const progress = duration > 0 ? (time / duration) * 100 : 0
 
   const handleDeviceChange = (newDeviceId: string) => {
@@ -39,6 +48,14 @@ export default function ControlRoom() {
   const handlePresetChange = (newPreset: PresetId) => {
     setActivePreset(newPreset)
     controls.switchPreset(activeDevice, newPreset)
+  }
+
+  // PlasmaGlow gets null when scrubbing → dark viewport
+  const plasmaSnapshot = scrubIndex !== null ? null : displaySnapshot
+
+  const handleRunProgram = (devId: string, json: string) => {
+    controls.runProgram(devId, json)
+    setShowPlanner(false)
   }
 
   return (
@@ -109,41 +126,58 @@ export default function ControlRoom() {
           >
             ↺ Reset
           </button>
+
+          {/* Edit Program button — visible when discharge is finished */}
+          {finished && (
+            <button
+              onClick={() => setShowPlanner(!showPlanner)}
+              className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 rounded text-sm font-semibold
+                         transition-colors cursor-pointer flex items-center gap-1"
+            >
+              {showPlanner ? '✕ Close' : '📋 Edit Program'}
+            </button>
+          )}
         </div>
 
         {/* Time readout */}
         <div className="font-mono text-sm text-gray-400 tabular-nums whitespace-nowrap">
           t = {time.toFixed(3)} s / {duration.toFixed(1)} s
+          {finished && (
+            <span className="ml-2 text-xs text-gray-600">
+              {scrubIndex !== null ? '(scrubbing)' : '(complete)'}
+            </span>
+          )}
         </div>
       </div>
 
       {/* ─── Main grid ─── */}
-      <div className="flex-1 grid grid-cols-[1fr_1.5fr_280px] grid-rows-[1fr_1fr] gap-2 p-2 min-h-0">
-        {/* Left column: Equilibrium (spans 2 rows) */}
-        <div className="row-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <EquilibriumCanvas snapshot={snapshot} wallJson={wallJson} />
-        </div>
-
-        {/* Centre top: Time traces */}
+      <div className="flex-1 grid grid-cols-[1fr_1.5fr_1fr] grid-rows-[1.1fr_1fr] gap-2 p-2 min-h-0">
+        {/* Top-left: Equilibrium cross-section (single cell) */}
         <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <div className="p-1 h-full overflow-y-auto">
-            <TimeTraces history={history} duration={duration} />
-          </div>
+          <EquilibriumCanvas snapshot={displaySnapshot} wallJson={wallJson} />
         </div>
 
-        {/* Right top: Disruption gauge */}
+        {/* Top row, cols 2-3: Unified trace panel */}
+        <div className="col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+          <UnifiedTracePanel
+            history={history}
+            programJson={programJson}
+            deviceId={activeDevice}
+            duration={duration}
+            finished={finished}
+            scrubIndex={scrubIndex}
+            onScrub={controls.setScrubIndex}
+          />
+        </div>
+
+        {/* Bottom row, cols 1-2: Status panel (extends under equilibrium) */}
+        <div className="col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+          <StatusPanel snapshot={displaySnapshot} />
+        </div>
+
+        {/* Bottom-right: Plasma viewport */}
         <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <DisruptionGauge snapshot={snapshot} />
-        </div>
-
-        {/* Centre bottom: Status panel */}
-        <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <StatusPanel snapshot={snapshot} />
-        </div>
-
-        {/* Right bottom: Plasma viewport placeholder */}
-        <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden flex items-center justify-center">
-          <PlasmaGlow snapshot={snapshot} />
+          <PlasmaGlow snapshot={plasmaSnapshot} />
         </div>
       </div>
 
@@ -154,46 +188,59 @@ export default function ControlRoom() {
           style={{ width: `${progress}%` }}
         />
       </div>
+
+      {/* ─── Shot Planner drawer ─── */}
+      {showPlanner && (
+        <ShotPlanner
+          deviceId={activeDevice}
+          onRun={handleRunProgram}
+          onClose={() => setShowPlanner(false)}
+        />
+      )}
     </div>
   )
 }
 
 /** Simple placeholder plasma glow — will become WebGL later. */
 function PlasmaGlow({ snapshot }: { snapshot: import('../lib/types').Snapshot | null }) {
-  if (!snapshot) {
-    return <span className="text-gray-600 text-sm font-mono">No plasma</span>
-  }
-
-  const temp = Math.min(snapshot.te0 / 10, 1) // 0→1 normalised
-  const dens = Math.min(snapshot.ne_bar / 1.5, 1)
+  const hasPlasma = snapshot !== null
+  const temp = hasPlasma ? Math.min(snapshot.te0 / 10, 1) : 0
+  const dens = hasPlasma ? Math.min(snapshot.ne_bar / 1.5, 1) : 0
   const brightness = temp * dens
-  const disrupted = snapshot.disrupted
+  const disrupted = snapshot?.disrupted ?? false
 
   // Color shifts from red-orange (cold) to blue-white (hot)
   const r = Math.round(255 - temp * 100)
   const g = Math.round(100 + temp * 120)
   const b = Math.round(150 + temp * 105)
-  const alpha = disrupted ? 0.05 : 0.15 + brightness * 0.6
+  const alpha = !hasPlasma || disrupted ? 0.05 : 0.15 + brightness * 0.6
 
   return (
-    <div className="w-full h-full flex items-center justify-center relative overflow-hidden">
-      {/* Port frame */}
-      <div className="absolute inset-4 rounded-full border-4 border-gray-700 overflow-hidden">
-        {/* Glow */}
-        <div
-          className="w-full h-full transition-all duration-200"
-          style={{
-            background: `radial-gradient(ellipse 70% 90% at 50% 50%, rgba(${r},${g},${b},${alpha}) 0%, transparent 100%)`,
-          }}
-        />
-        {/* ELM flash */}
-        {snapshot.elm_active && (
-          <div className="absolute inset-0 bg-amber-300 opacity-30 animate-pulse" />
-        )}
-      </div>
-      {/* Label */}
-      <div className="absolute bottom-2 text-[10px] text-gray-600 font-mono">
-        Port view
+    <div className="w-full h-full flex items-center justify-center p-1">
+      <div className="h-full max-w-full aspect-square relative">
+        {/* Port frame */}
+        <div className="absolute inset-1 rounded-full border-4 border-gray-700 overflow-hidden">
+          {hasPlasma ? (
+            <>
+              <div
+                className="w-full h-full transition-all duration-200"
+                style={{
+                  background: `radial-gradient(ellipse 70% 90% at 50% 50%, rgba(${r},${g},${b},${alpha}) 0%, transparent 100%)`,
+                }}
+              />
+              {snapshot.elm_active && (
+                <div className="absolute inset-0 bg-amber-300 opacity-30 animate-pulse" />
+              )}
+            </>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <span className="text-gray-600 text-sm font-mono">No plasma</span>
+            </div>
+          )}
+        </div>
+        <div className="absolute bottom-0 left-0 right-0 text-center text-[10px] text-gray-600 font-mono">
+          Port view
+        </div>
       </div>
     </div>
   )

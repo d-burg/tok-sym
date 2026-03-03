@@ -53,24 +53,62 @@ impl Device {
     }
 }
 
-/// Approximate DIII-D wall outline (simplified polygon)
+/// Approximate DIII-D first wall outline (hand-crafted polygon).
+///
+/// Based on the actual DIII-D vessel cross-section with a D-shaped upper
+/// wall, inboard limiters, and open lower divertor with inner/outer baffles
+/// and a divertor floor. Coordinates in (R, Z) meters.
+///
+/// Traversed clockwise starting from the outboard midplane.
 fn diiid_wall() -> Vec<(f64, f64)> {
-    // Simplified DIII-D first wall contour (R, Z) in meters
-    // Clockwise from outboard midplane
-    let n = 60;
-    let r0 = 1.67;
-    let a_wall = 0.72; // wall minor radius slightly larger than plasma
-    let kappa_wall = 1.9;
-    let delta_wall: f64 = 0.55;
-    let mut wall = Vec::with_capacity(n + 1);
-    for i in 0..=n {
-        let theta = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
-        let r = r0 + a_wall * (theta + delta_wall.asin() * theta.sin()).cos();
-        let z = kappa_wall * a_wall * theta.sin();
-        wall.push((r, z));
-    }
-    // Add simplified divertor shelf at bottom
-    wall
+    vec![
+        // Outboard midplane → top (outer wall, slight D-shape)
+        (2.37, 0.00),
+        (2.36, 0.20),
+        (2.33, 0.40),
+        (2.28, 0.60),
+        (2.20, 0.80),
+        (2.08, 0.95),
+        // Top dome (flattened, shifted inward)
+        (1.93, 1.07),
+        (1.75, 1.14),
+        (1.58, 1.17),
+        (1.40, 1.14),
+        (1.25, 1.07),
+        // Inboard wall (vertical high-field side)
+        (1.13, 0.95),
+        (1.04, 0.75),
+        (1.01, 0.50),
+        (1.01, 0.25),
+        (1.01, 0.00),
+        (1.01, -0.25),
+        (1.01, -0.50),
+        (1.04, -0.75),
+        (1.10, -0.92),
+        // Inner divertor baffle (shelf turning toward floor)
+        (1.13, -1.02),
+        (1.15, -1.10),
+        (1.13, -1.18),
+        (1.10, -1.25),
+        // Divertor floor (flat bottom, connects inner→outer)
+        (1.15, -1.36),
+        (1.25, -1.42),
+        (1.40, -1.46),
+        (1.55, -1.48),
+        (1.70, -1.46),
+        (1.85, -1.42),
+        (1.95, -1.36),
+        // Outer divertor baffle (shelf rising from floor)
+        (2.04, -1.25),
+        (2.10, -1.10),
+        (2.14, -1.00),
+        // Outboard lower wall → midplane
+        (2.22, -0.85),
+        (2.30, -0.65),
+        (2.34, -0.45),
+        (2.36, -0.22),
+        (2.37, 0.00),
+    ]
 }
 
 /// Approximate ITER wall outline (simplified polygon)

@@ -85,8 +85,24 @@ export default function EquilibriumCanvas({ snapshot, wallJson }: Props) {
     const toX = (r: number) => (r - rLo) * scale + offsetX
     const toY = (z: number) => (zHi - z) * scale + offsetY // flip Y
 
-    // --- Draw flux surfaces ---
+    // --- Build wall clip path (used to mask flux surfaces & separatrix) ---
+    const buildWallPath = () => {
+      ctx.beginPath()
+      for (let i = 0; i < wall.length; i++) {
+        const x = toX(wall[i][0])
+        const y = toY(wall[i][1])
+        if (i === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.closePath()
+    }
+
+    // --- Draw flux surfaces (clipped to wall) ---
     if (snapshot && snapshot.flux_surfaces && snapshot.flux_surfaces.length > 0) {
+      ctx.save()
+      buildWallPath()
+      ctx.clip()
+
       const surfaces = snapshot.flux_surfaces
       const nSurf = surfaces.length
 
@@ -100,29 +116,28 @@ export default function EquilibriumCanvas({ snapshot, wallJson }: Props) {
         drawContour(ctx, contour, toX, toY)
       }
       ctx.globalAlpha = 1.0
+      ctx.restore()
     }
 
-    // --- Draw separatrix ---
+    // --- Draw separatrix (clipped to wall) ---
     if (snapshot && snapshot.separatrix && snapshot.separatrix.points.length > 2) {
+      ctx.save()
+      buildWallPath()
+      ctx.clip()
+
       ctx.strokeStyle = '#facc15' // bright yellow
       ctx.lineWidth = 2
       ctx.shadowColor = '#facc15'
       ctx.shadowBlur = 6
       drawContour(ctx, snapshot.separatrix, toX, toY)
       ctx.shadowBlur = 0
+      ctx.restore()
     }
 
     // --- Draw wall outline ---
     ctx.strokeStyle = '#6b7280'
     ctx.lineWidth = 2
-    ctx.beginPath()
-    for (let i = 0; i < wall.length; i++) {
-      const x = toX(wall[i][0])
-      const y = toY(wall[i][1])
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.closePath()
+    buildWallPath()
     ctx.stroke()
 
     // --- Draw magnetic axis ---

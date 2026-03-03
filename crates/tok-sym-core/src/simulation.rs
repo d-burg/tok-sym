@@ -299,6 +299,11 @@ pub struct Simulation {
     // Current actual Ip (may differ from programmed if disrupting)
     actual_ip: f64,
 
+    // Smoothed values for disruption risk (filters out ELM transients)
+    smoothed_beta_n: f64,
+    smoothed_f_greenwald: f64,
+    smoothed_p_rad_frac: f64,
+
     // Equilibrium grid resolution
     eq_nr: usize,
     eq_nz: usize,
@@ -321,6 +326,9 @@ impl Simulation {
             equilibrium,
             _noise: NoiseGen::new(12345),
             actual_ip: 0.0,
+            smoothed_beta_n: 0.0,
+            smoothed_f_greenwald: 0.0,
+            smoothed_p_rad_frac: 0.0,
             eq_nr: 48,
             eq_nz: 64,
             n_flux_surfaces: 8,
@@ -341,6 +349,9 @@ impl Simulation {
         self.profiles = Profiles::default();
         self.disruption.reset();
         self.actual_ip = 0.0;
+        self.smoothed_beta_n = 0.0;
+        self.smoothed_f_greenwald = 0.0;
+        self.smoothed_p_rad_frac = 0.0;
     }
 
     /// Start or resume the simulation.
@@ -387,12 +398,21 @@ impl Simulation {
             0.0
         };
 
+        // Exponential smoothing of disruption risk inputs (τ ≈ 100ms).
+        // This filters out rapid ELM transients (~1-10ms) while tracking
+        // slower physics trends (density ramps, beta evolution, etc.).
+        let tau_smooth = 0.1; // 100ms smoothing time constant
+        let alpha = 1.0 - (-dt / tau_smooth).exp();
+        self.smoothed_beta_n += (self.transport.beta_n - self.smoothed_beta_n) * alpha;
+        self.smoothed_f_greenwald += (self.transport.f_greenwald - self.smoothed_f_greenwald) * alpha;
+        self.smoothed_p_rad_frac += (p_rad_frac - self.smoothed_p_rad_frac) * alpha;
+
         if !self.disruption.disrupted && self.actual_ip > 0.1 {
             self.disruption.update_risk(
-                self.transport.f_greenwald,
-                self.transport.beta_n,
-                self.transport.q95,
-                p_rad_frac,
+                self.smoothed_f_greenwald,
+                self.smoothed_beta_n,
+                self.transport.q95, // q95 not affected by ELMs, no smoothing needed
+                self.smoothed_p_rad_frac,
                 self.actual_ip,
             );
             self.disruption.check_trigger(dt);
