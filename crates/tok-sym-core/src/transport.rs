@@ -57,6 +57,12 @@ pub struct TransportModel {
     /// ELM display cooldown (s) — keeps elm_active true for multiple timesteps
     /// so the display can capture it (prevents temporal aliasing at high frame skip)
     pub elm_cooldown: f64,
+    /// ELM type: 0=none, 1=Type I (large, low freq), 2=Type II (small, high freq)
+    pub elm_type: u8,
+    /// Simple xorshift RNG state for stochastic ELM timing/amplitude
+    pub elm_rng_state: u64,
+    /// Pre-computed next ELM period with stochastic jitter (s)
+    pub elm_next_period: f64,
     /// Neon impurity fraction (relative to electron density)
     pub neon_fraction: f64,
 }
@@ -86,6 +92,9 @@ impl Default for TransportModel {
             elm_energy_loss: 0.0,
             elm_suppressed: false,
             elm_cooldown: 0.0,
+            elm_type: 0,
+            elm_rng_state: 54321,
+            elm_next_period: 0.0,
             neon_fraction: 0.0,
         }
     }
@@ -117,6 +126,19 @@ pub struct ProgramValues {
 }
 
 impl TransportModel {
+    /// Simple xorshift RNG returning a value in [0, 1).
+    fn next_rng(&mut self) -> f64 {
+        let mut x = self.elm_rng_state;
+        if x == 0 {
+            x = 12345;
+        }
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.elm_rng_state = x;
+        (x as f64) / (u64::MAX as f64)
+    }
+
     /// Advance the transport model by one timestep.
     ///
     /// # Arguments
@@ -265,10 +287,19 @@ impl TransportModel {
         self.w_th += dw_dt * dt;
         self.w_th = self.w_th.max(0.0);
 
-        // ── ELM model (Type-I ELMs in H-mode, with neon seeding suppression) ──
-        // Decrement ELM display cooldown first — keeps elm_active true for
-        // multiple timesteps (15 ms ≈ 3 steps) so the animation frame loop
-        // captures it even when skipping 3–12 physics steps per rendered frame.
+        // ── ELM model (Type-I / Type-II ELMs in H-mode, with neon suppression) ──
+        //
+        // Type I: Low frequency (5–25 Hz), large energy crashes (5–13% W_th),
+        //         distinct Dα spikes. Standard H-mode with no/low impurity seeding.
+        // Type II: High frequency (80–200 Hz), small crashes (0.5–1.5% W_th),
+        //          "grassy" Dα. Partial neon seeding approaching suppression.
+        // Suppressed: QCE regime with continuous small losses, no ELM crashes.
+        //
+        // Stochasticity: each ELM period and amplitude are randomly jittered
+        // to produce realistic irregular timing as seen in experiment.
+
+        // Decrement display cooldown — keeps elm_active true for a few timesteps
+        // so the animation frame loop reliably captures the ELM event.
         if self.elm_cooldown > 0.0 {
             self.elm_cooldown -= dt;
             self.elm_active = self.elm_cooldown > 0.0;
@@ -276,29 +307,63 @@ impl TransportModel {
             self.elm_active = false;
         }
         self.elm_energy_loss = 0.0;
+        self.elm_type = 0;
 
-        // Check for ELM suppression via neon seeding
-        // When core-averaged neon fraction exceeds ~0.3%, the edge concentration
-        // is high enough to access the QCE regime (Quiescent Continuous Exhaust).
-        // Threshold is lower than physical edge values because our 0D model
-        // reports volume-averaged fractions, not edge-local values.
-        self.elm_suppressed = self.in_hmode && self.neon_fraction > 0.003;
+        // Determine ELM regime based on neon seeding level
+        self.elm_suppressed = self.in_hmode && self.neon_fraction >= 0.003;
+        let elm_regime: u8 = if !self.in_hmode {
+            0 // No ELMs outside H-mode
+        } else if self.neon_fraction >= 0.003 {
+            0 // Suppressed → QCE
+        } else if self.neon_fraction >= 0.001 {
+            2 // Type II (grassy, transitional)
+        } else {
+            1 // Type I (standard large ELMs)
+        };
 
-        if self.in_hmode && !self.elm_suppressed {
+        if elm_regime > 0 {
             self.elm_timer += dt;
-            // ELM frequency increases with power above threshold
             let power_excess = (net_heating / self.p_lh_threshold - 1.0).max(0.0);
-            let elm_freq = 10.0 + 50.0 * power_excess; // Hz
-            let elm_period = 1.0 / elm_freq;
 
-            if self.elm_timer > elm_period {
+            // Pre-compute jittered period for the next ELM cycle if needed
+            if self.elm_next_period <= 0.0 {
+                let (mean_freq, jitter_frac) = if elm_regime == 1 {
+                    // Type I: 5–25 Hz, ±30% timing jitter
+                    (5.0 + 20.0 * power_excess.min(1.0), 0.3)
+                } else {
+                    // Type II: 80–200 Hz, ±50% timing jitter
+                    (80.0 + 120.0 * power_excess.min(1.0), 0.5)
+                };
+                let mean_period = 1.0 / mean_freq;
+                let rng_val = self.next_rng(); // 0..1
+                let jitter = 1.0 + (rng_val - 0.5) * 2.0 * jitter_frac;
+                self.elm_next_period = (mean_period * jitter).max(0.002);
+            }
+
+            if self.elm_timer > self.elm_next_period {
                 self.elm_timer = 0.0;
+                self.elm_next_period = 0.0; // recompute with fresh jitter next cycle
+
                 self.elm_active = true;
-                self.elm_cooldown = 0.015; // 15 ms = 3 timesteps for display capture
-                // ELM crashes ~3-8% of stored energy
-                let elm_fraction = 0.03 + 0.05 * power_excess.min(1.0);
-                self.elm_energy_loss = elm_fraction * self.w_th;
-                self.w_th *= 1.0 - elm_fraction;
+                let rng_amp = self.next_rng(); // 0..1 for amplitude jitter
+
+                if elm_regime == 1 {
+                    // Type I: large crash, 10 ms cooldown for distinct display spikes
+                    self.elm_type = 1;
+                    self.elm_cooldown = 0.010;
+                    let elm_fraction = (0.05 + 0.08 * power_excess.min(1.0))
+                        * (0.8 + 0.4 * rng_amp); // ±20% amplitude variation
+                    self.elm_energy_loss = elm_fraction * self.w_th;
+                    self.w_th *= 1.0 - elm_fraction;
+                } else {
+                    // Type II: small crash, 2 ms cooldown for grassy appearance
+                    self.elm_type = 2;
+                    self.elm_cooldown = 0.002;
+                    let elm_fraction = (0.005 + 0.01 * power_excess.min(1.0))
+                        * (0.6 + 0.8 * rng_amp); // wider amplitude variation
+                    self.elm_energy_loss = elm_fraction * self.w_th;
+                    self.w_th *= 1.0 - elm_fraction;
+                }
             }
         } else if self.elm_suppressed {
             // QCE regime: continuous small transport replaces ELM crashes

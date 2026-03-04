@@ -150,13 +150,15 @@ export default function ControlRoom() {
               ⏸ Pause
             </button>
           )}
-          <button
-            onClick={controls.reset}
-            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold
-                       transition-colors cursor-pointer"
-          >
-            {hasCustomProgram ? '↺ New Shot' : '↺ Reset'}
-          </button>
+          {!(running && hasCustomProgram) && (
+            <button
+              onClick={controls.reset}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold
+                         transition-colors cursor-pointer"
+            >
+              {hasCustomProgram ? '↺ Reset Machine' : '↺ Reset'}
+            </button>
+          )}
 
           {/* Speed selector */}
           <div className="flex rounded overflow-hidden border border-gray-700">

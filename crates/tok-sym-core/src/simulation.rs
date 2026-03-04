@@ -132,11 +132,17 @@ impl DischargeProgram {
             ],
             p_ech: vec![(0.0, 0.0), (duration, 0.0)],
             p_ich: vec![(0.0, 0.0), (duration, 0.0)],
-            kappa: vec![(0.0, 1.0), (1.0, device.kappa), (duration, device.kappa)],
+            kappa: vec![
+                (0.0, 1.0),
+                (1.0, device.kappa),
+                (duration - 1.0, device.kappa),
+                (duration, 1.0),
+            ],
             delta: vec![
                 (0.0, 0.0),
                 (1.0, device.delta_lower),
-                (duration, device.delta_lower),
+                (duration - 1.0, device.delta_lower),
+                (duration, 0.0),
             ],
             d2_puff: vec![
                 (0.0, 0.0),
@@ -178,11 +184,17 @@ impl DischargeProgram {
             p_nbi: vec![(0.0, 0.0), (duration, 0.0)],
             p_ech: vec![(0.0, 0.0), (duration, 0.0)],
             p_ich: vec![(0.0, 0.0), (duration, 0.0)],
-            kappa: vec![(0.0, 1.0), (1.0, device.kappa), (duration, device.kappa)],
+            kappa: vec![
+                (0.0, 1.0),
+                (1.0, device.kappa),
+                (duration - 1.0, device.kappa),
+                (duration, 1.0),
+            ],
             delta: vec![
                 (0.0, 0.0),
                 (1.0, device.delta_lower),
-                (duration, device.delta_lower),
+                (duration - 1.0, device.delta_lower),
+                (duration, 0.0),
             ],
             d2_puff: vec![
                 (0.0, 0.0),
@@ -232,11 +244,17 @@ impl DischargeProgram {
             ],
             p_ech: vec![(0.0, 0.0), (duration, 0.0)],
             p_ich: vec![(0.0, 0.0), (duration, 0.0)],
-            kappa: vec![(0.0, 1.0), (1.0, device.kappa), (duration, device.kappa)],
+            kappa: vec![
+                (0.0, 1.0),
+                (1.0, device.kappa),
+                (duration - 1.0, device.kappa),
+                (duration, 1.0),
+            ],
             delta: vec![
                 (0.0, 0.0),
                 (1.0, device.delta_lower),
-                (duration, device.delta_lower),
+                (duration - 1.0, device.delta_lower),
+                (duration, 0.0),
             ],
             d2_puff: vec![
                 (0.0, 0.0),
@@ -287,6 +305,7 @@ pub struct SimulationSnapshot {
     pub h_factor: f64,
     pub in_hmode: bool,
     pub elm_active: bool,
+    pub elm_type: u8,
     pub elm_suppressed: bool,
     pub ne_ped: f64,
     pub te_ped: f64,
@@ -637,7 +656,7 @@ impl Simulation {
             self.transport.q95,
             self.transport.f_greenwald,
             self.transport.in_hmode,
-            self.transport.elm_active,
+            self.transport.elm_type,
             if self.disruption.disrupted {
                 5.0
             } else {
@@ -674,6 +693,7 @@ impl Simulation {
             h_factor: self.transport.h_factor,
             in_hmode: self.transport.in_hmode,
             elm_active: self.transport.elm_active,
+            elm_type: self.transport.elm_type,
             elm_suppressed: self.transport.elm_suppressed,
             ne_ped: self.profiles.ne_ped,
             te_ped: self.profiles.te_ped,

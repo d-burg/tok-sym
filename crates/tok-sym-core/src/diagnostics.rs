@@ -88,7 +88,7 @@ impl DiagnosticSignals {
         q95: f64,
         f_greenwald: f64,
         _in_hmode: bool,
-        elm_active: bool,
+        elm_type: u8,
         locked_mode_amp: f64,
         noise: &mut NoiseGen,
     ) -> Self {
@@ -101,8 +101,12 @@ impl DiagnosticSignals {
 
         // D-alpha: baseline proportional to edge density, spikes during ELMs
         let d_alpha_base = ne_bar * 0.5 + noise.gaussian(0.02);
-        let d_alpha = if elm_active {
-            d_alpha_base + 5.0 + noise.gaussian(1.0)
+        let d_alpha = if elm_type == 1 {
+            // Type I: large distinct spike
+            d_alpha_base + 5.0 + noise.gaussian(1.5)
+        } else if elm_type == 2 {
+            // Type II: small grassy spike
+            d_alpha_base + 1.0 + noise.gaussian(0.4)
         } else {
             d_alpha_base.max(0.0)
         };
@@ -165,7 +169,7 @@ mod tests {
     fn test_diagnostic_signals() {
         let mut noise = NoiseGen::new(42);
         let diag = DiagnosticSignals::from_state(
-            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, false, 0.0, &mut noise,
+            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, 0, 0.0, &mut noise,
         );
         assert!(diag.ip > 0.0);
         assert!(diag.ne_bar > 0.0);
@@ -174,18 +178,41 @@ mod tests {
     }
 
     #[test]
-    fn test_elm_spike() {
+    fn test_elm_type1_spike() {
         let mut noise = NoiseGen::new(42);
         let diag_no_elm = DiagnosticSignals::from_state(
-            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, false, 0.0, &mut noise,
+            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, 0, 0.0, &mut noise,
         );
         let diag_elm = DiagnosticSignals::from_state(
-            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, true, 0.0, &mut noise,
+            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, 1, 0.0, &mut noise,
         );
-        // D-alpha should spike during ELM
+        // D-alpha should spike during Type I ELM
         assert!(
             diag_elm.d_alpha > diag_no_elm.d_alpha * 2.0,
-            "D-alpha should spike during ELM"
+            "D-alpha should spike during Type I ELM"
+        );
+    }
+
+    #[test]
+    fn test_elm_type2_spike() {
+        let mut noise = NoiseGen::new(42);
+        let diag_no_elm = DiagnosticSignals::from_state(
+            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, 0, 0.0, &mut noise,
+        );
+        let diag_elm2 = DiagnosticSignals::from_state(
+            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, 2, 0.0, &mut noise,
+        );
+        let diag_elm1 = DiagnosticSignals::from_state(
+            1.5, 0.5, 3.0, 1.0, 0.3, 5.0, 1.8, 3.5, 0.6, true, 1, 0.0, &mut noise,
+        );
+        // Type II spike should be above baseline but smaller than Type I
+        assert!(
+            diag_elm2.d_alpha > diag_no_elm.d_alpha,
+            "Type II D-alpha should exceed baseline"
+        );
+        assert!(
+            diag_elm1.d_alpha > diag_elm2.d_alpha,
+            "Type I D-alpha should exceed Type II"
         );
     }
 }
