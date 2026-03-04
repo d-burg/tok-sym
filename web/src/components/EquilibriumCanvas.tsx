@@ -200,6 +200,14 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
         ctx.fillStyle = '#9ca3af'
         ctx.fillText('L-mode', labelX, labelY)
       }
+      labelY -= 16
+      if (snapshot.is_limited) {
+        ctx.fillStyle = '#f59e0b'
+        ctx.fillText('LIMITED', labelX, labelY)
+      } else {
+        ctx.fillStyle = '#6b7280'
+        ctx.fillText('DIVERTED', labelX, labelY)
+      }
     }
   }, [snapshot, wallJson, limiterPoints])
 

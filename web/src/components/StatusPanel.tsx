@@ -30,12 +30,6 @@ export default function StatusPanel({ snapshot }: Props) {
         >
           {s.disrupted ? 'DISRUPTED' : s.in_hmode ? 'H-MODE' : 'L-MODE'}
         </span>
-        {s.elm_active && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-900 text-amber-300 animate-pulse shrink-0">
-            ELM
-          </span>
-        )}
-
         {/* Disruption risk bar */}
         <DisruptionRisk risk={s.disruption_risk} snapshot={s} />
 

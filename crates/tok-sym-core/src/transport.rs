@@ -52,6 +52,10 @@ pub struct TransportModel {
     pub elm_active: bool,
     /// ELM energy loss fraction
     pub elm_energy_loss: f64,
+    /// Whether ELMs are suppressed (e.g., by neon seeding / QCE regime)
+    pub elm_suppressed: bool,
+    /// Neon impurity fraction (relative to electron density)
+    pub neon_fraction: f64,
 }
 
 impl Default for TransportModel {
@@ -67,7 +71,7 @@ impl Default for TransportModel {
             p_input: 0.0,
             p_loss: 0.0,
             p_lh_threshold: 1.0,
-            h_factor: 1.0,
+            h_factor: 0.5,
             beta_t: 0.0,
             beta_n: 0.0,
             q95: 10.0,
@@ -77,6 +81,8 @@ impl Default for TransportModel {
             elm_timer: 0.0,
             elm_active: false,
             elm_energy_loss: 0.0,
+            elm_suppressed: false,
+            neon_fraction: 0.0,
         }
     }
 }
@@ -100,6 +106,10 @@ pub struct ProgramValues {
     pub kappa: f64,
     /// Target triangularity
     pub delta: f64,
+    /// D2 gas puff rate (10²⁰ particles/s)
+    pub d2_puff: f64,
+    /// Neon impurity seeding rate (10²⁰ particles/s)
+    pub neon_puff: f64,
 }
 
 impl TransportModel {
@@ -138,13 +148,28 @@ impl TransportModel {
         let volume = device.volume;
         let surface = device.surface_area;
 
-        // ── Density evolution (simple relaxation to target) ──
+        // ── Density evolution (relaxation to target + gas puffing) ──
         let ne_target = prog.ne_target;
         let tau_density = 0.3; // density response time (s)
-        self.ne_bar += (ne_target - self.ne_bar) * (1.0 - (-dt / tau_density).exp());
+        let ne_relaxation = (ne_target - self.ne_bar) * (1.0 - (-dt / tau_density).exp());
+        // D2 gas puffing adds density source
+        let fueling_eff = 0.1; // ~10% fueling efficiency (typical for gas puff)
+        let ne_from_puff = prog.d2_puff * fueling_eff * dt / volume.max(1.0);
+        self.ne_bar += ne_relaxation + ne_from_puff;
         self.ne_bar = self.ne_bar.max(0.01);
         // Central density peaking factor ~1.3
         self.ne0 = self.ne_bar * 1.3;
+
+        // ── Neon fraction evolution ──
+        // Neon accumulates from seeding, decays via particle transport
+        let tau_neon = 0.5; // impurity confinement time (s)
+        let neon_source = if self.ne_bar > 0.05 {
+            prog.neon_puff * 0.3 / (self.ne_bar * volume).max(0.01)
+        } else {
+            0.0
+        };
+        self.neon_fraction += (neon_source - self.neon_fraction / tau_neon) * dt;
+        self.neon_fraction = self.neon_fraction.clamp(0.0, 0.1); // max 10% neon fraction
 
         // ── q95 ──
         // Cylindrical safety factor with shape correction
@@ -179,7 +204,14 @@ impl TransportModel {
         let p_brem = 5.35e-37 * ne_m3 * ne_m3 * z_eff * te_avg.sqrt() * volume * 1e-6; // MW
         // Line radiation (simplified: proportional to ne² at low Te)
         let p_line = p_brem * 0.3 * (z_eff - 1.0).max(0.0);
-        self.p_rad = p_brem + p_line;
+        // Neon impurity radiation — effective 0D Lz coefficient.
+        // Physical Lz(Ne) peaks at ~5e-31 W·m³ near 0.5 keV, but in real tokamaks
+        // neon concentrates in the edge/SOL, not the core volume. For our volume-
+        // averaged model, we use ~50x lower effective Lz so that realistic seeding
+        // rates (0.3–0.7 × 10²⁰/s) produce a few MW of radiation, not hundreds.
+        let lz_neon = 1.0e-32 * (1.0 + 0.5 * (te_avg - 1.0).abs()).max(0.5);
+        let p_neon = self.neon_fraction * ne_m3 * ne_m3 * lz_neon * volume * 1e-6; // MW
+        self.p_rad = p_brem + p_line + p_neon;
         self.p_rad = self.p_rad.max(0.0);
 
         // ── L-H transition threshold ──
@@ -200,7 +232,7 @@ impl TransportModel {
             // H → L back-transition
             if net_heating < 0.8 * self.p_lh_threshold || self.q95 < 2.0 {
                 self.in_hmode = false;
-                self.h_factor = 1.0;
+                self.h_factor = 0.5;
             }
         }
 
@@ -217,10 +249,8 @@ impl TransportModel {
             * kappa.powf(0.78)
             * mass.powf(0.19);
 
-        // H-mode enhancement
-        if self.in_hmode {
-            self.tau_e *= self.h_factor;
-        }
+        // Confinement mode multiplier: L-mode = 0.5 (IPB98 is H-mode reference), H-mode = 1.0
+        self.tau_e *= self.h_factor;
         self.tau_e = self.tau_e.max(0.001);
 
         // ── Power balance: dW/dt = P_input - W/τ_E - P_rad ──
@@ -231,10 +261,18 @@ impl TransportModel {
         self.w_th += dw_dt * dt;
         self.w_th = self.w_th.max(0.0);
 
-        // ── ELM model (Type-I ELMs in H-mode) ──
+        // ── ELM model (Type-I ELMs in H-mode, with neon seeding suppression) ──
         self.elm_active = false;
         self.elm_energy_loss = 0.0;
-        if self.in_hmode {
+
+        // Check for ELM suppression via neon seeding
+        // When core-averaged neon fraction exceeds ~0.3%, the edge concentration
+        // is high enough to access the QCE regime (Quiescent Continuous Exhaust).
+        // Threshold is lower than physical edge values because our 0D model
+        // reports volume-averaged fractions, not edge-local values.
+        self.elm_suppressed = self.in_hmode && self.neon_fraction > 0.003;
+
+        if self.in_hmode && !self.elm_suppressed {
             self.elm_timer += dt;
             // ELM frequency increases with power above threshold
             let power_excess = (net_heating / self.p_lh_threshold - 1.0).max(0.0);
@@ -249,6 +287,12 @@ impl TransportModel {
                 self.elm_energy_loss = elm_fraction * self.w_th;
                 self.w_th *= 1.0 - elm_fraction;
             }
+        } else if self.elm_suppressed {
+            // QCE regime: continuous small transport replaces ELM crashes
+            let qce_loss_rate = 0.005; // fraction per tau_E equivalent
+            let qce_loss = qce_loss_rate * self.w_th * dt / self.tau_e.max(0.01);
+            self.w_th -= qce_loss;
+            self.w_th = self.w_th.max(0.0);
         }
 
         // ── Derive temperatures from stored energy ──
@@ -271,8 +315,9 @@ impl TransportModel {
         let mu0 = 4.0 * std::f64::consts::PI * 1e-7;
         let b_pressure = bt * bt / (2.0 * mu0);
         self.beta_t = (p_avg / b_pressure * 100.0).max(0.0); // percent
-        self.beta_n = if ip > 0.01 {
-            self.beta_t * a * bt / ip // %·m·T/MA
+        self.beta_n = if ip > 0.05 {
+            // Clamp to Troyon no-wall limit to prevent nonphysical spikes during rampdown
+            (self.beta_t * a * bt / ip).min(4.0) // %·m·T/MA
         } else {
             0.0
         };
@@ -306,6 +351,8 @@ mod tests {
             p_ich: 0.0,
             kappa: 1.8,
             delta: 0.55,
+            d2_puff: 0.0,
+            neon_puff: 0.0,
         };
 
         // Run for 100ms
@@ -335,6 +382,8 @@ mod tests {
             p_ich: 0.0,
             kappa: 1.8,
             delta: 0.55,
+            d2_puff: 0.0,
+            neon_puff: 0.0,
         };
 
         // Run for 2 seconds
@@ -365,6 +414,8 @@ mod tests {
             p_ich: 0.0,
             kappa: 1.7,
             delta: 0.33,
+            d2_puff: 0.0,
+            neon_puff: 0.0,
         };
 
         // Run to quasi-steady-state

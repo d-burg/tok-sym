@@ -33,6 +33,8 @@ const SCALAR_PARAMS: ScalarParam[] = [
   { key: 'p_nbi', label: 'NBI power', unit: 'MW', waveformKey: 'p_nbi', min: 0, max: 40, step: 0.5, precision: 1 },
   { key: 'p_ech', label: 'ECH power', unit: 'MW', waveformKey: 'p_ech', min: 0, max: 20, step: 0.5, precision: 1 },
   { key: 'ne', label: 'Density target', unit: '10²⁰m⁻³', waveformKey: 'ne_target', min: 0.1, max: 3.0, step: 0.05, precision: 2 },
+  { key: 'd2_puff', label: 'D₂ gas puff', unit: '10²⁰/s', waveformKey: 'd2_puff', min: 0, max: 10, step: 0.5, precision: 1 },
+  { key: 'neon_puff', label: 'Neon seeding', unit: '10²⁰/s', waveformKey: 'neon_puff', min: 0, max: 2.0, step: 0.05, precision: 2 },
   { key: 'kappa', label: 'Elongation κ', unit: '', waveformKey: 'kappa', min: 1.0, max: 2.2, step: 0.05, precision: 2 },
   { key: 'delta', label: 'Triangularity δ', unit: '', waveformKey: 'delta', min: 0.0, max: 0.8, step: 0.05, precision: 2 },
 ]
@@ -48,10 +50,29 @@ function getFlatTopValue(waveform: WaveformPoint[]): number {
 /**
  * Scale a waveform so its flat-top (max) value equals `newValue`.
  * Preserves the ramp shape by applying a uniform scale factor.
+ * When the base waveform is all-zeros, creates a heating-phase-aligned
+ * ramp (20%→80% of duration) instead of a flat constant.
  */
 function scaleWaveform(waveform: WaveformPoint[], newValue: number): WaveformPoint[] {
   const oldMax = getFlatTopValue(waveform)
-  if (oldMax <= 0) return waveform.map(([t]) => [t, newValue])
+  if (oldMax <= 0) {
+    // Base waveform is all zeros — create a ramp during the mid-discharge
+    // phase (well after H-mode transition, before rampdown) so that
+    // impurity seeding doesn't radiate away a cold startup plasma.
+    const tEnd = waveform.length > 0 ? waveform[waveform.length - 1][0] : 10
+    const tOn = tEnd * 0.30   // start ramp at 30% of duration
+    const tFlat = tEnd * 0.35 // reach flat-top at 35%
+    const tOff = tEnd * 0.70  // start ramp-down at 70%
+    const tDown = tEnd * 0.75 // off by 75%
+    return [
+      [0, 0],
+      [tOn, 0],
+      [tFlat, newValue],
+      [tOff, newValue],
+      [tDown, 0],
+      [tEnd, 0],
+    ]
+  }
   const factor = newValue / oldMax
   return waveform.map(([t, v]) => [t, v * factor])
 }
@@ -148,7 +169,7 @@ export default function ShotPlanner({ deviceId, onRun, onClose }: Props) {
     if (durationOverride !== null && durationOverride !== baseProgram.duration) {
       const timeScale = durationOverride / baseProgram.duration
       modified.duration = durationOverride
-      const waveformKeys: (keyof DischargeProgram)[] = ['ip', 'bt', 'ne_target', 'p_nbi', 'p_ech', 'p_ich', 'kappa', 'delta']
+      const waveformKeys: (keyof DischargeProgram)[] = ['ip', 'bt', 'ne_target', 'p_nbi', 'p_ech', 'p_ich', 'kappa', 'delta', 'd2_puff', 'neon_puff']
       for (const k of waveformKeys) {
         const wf = modified[k] as WaveformPoint[]
         ;(modified as Record<string, unknown>)[k] = wf.map(([t, v]) => [t * timeScale, v] as WaveformPoint)
@@ -172,6 +193,8 @@ export default function ShotPlanner({ deviceId, onRun, onClose }: Props) {
     p_nbi: '#3b82f6',
     p_ech: '#8b5cf6',
     ne: '#a78bfa',
+    d2_puff: '#60a5fa',
+    neon_puff: '#86efac',
     kappa: '#f59e0b',
     delta: '#ef4444',
   }

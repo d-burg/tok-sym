@@ -1,26 +1,43 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
 import type { TracePoint } from '../lib/types'
 import type { DischargeProgram } from '../lib/wasm'
 import { getDevice } from '../lib/wasm'
 import { computeTargetTraces, type TargetTraces } from '../lib/targetTraces'
 
-/* ─── Trace configuration ────────────────────────────────── */
+/* ─── Full trace catalogue ───────────────────────────────── */
 
 interface TraceConfig {
   key: keyof TracePoint
   label: string
   unit: string
   color: string
-  targetKey?: 'ip' | 'beta_n' // which target trace to overlay (if any)
-  clampToTarget?: boolean // if true, y-axis is set from target trace only (actual is clipped)
+  targetKey?: 'ip' | 'beta_n'
+  clampToTarget?: boolean
 }
 
-const TRACES: TraceConfig[] = [
-  { key: 'ip', label: 'Iₚ', unit: 'MA', color: '#22d3ee', targetKey: 'ip' },
-  { key: 'beta_n', label: 'βN', unit: '', color: '#fbbf24', targetKey: 'beta_n', clampToTarget: true },
-  { key: 'li', label: 'li', unit: '', color: '#38bdf8' },
-  { key: 'd_alpha', label: 'Dα', unit: 'a.u.', color: '#fb7185' },
+const ALL_TRACES: TraceConfig[] = [
+  { key: 'ip',               label: 'Iₚ',      unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
+  { key: 'beta_n',           label: 'βN',       unit: '',         color: '#fbbf24', targetKey: 'beta_n', clampToTarget: true },
+  { key: 'li',               label: 'li',       unit: '',         color: '#38bdf8' },
+  { key: 'd_alpha',          label: 'Dα',       unit: 'a.u.',     color: '#fb7185' },
+  { key: 'q95',              label: 'q95',      unit: '',         color: '#a78bfa' },
+  { key: 'h_factor',         label: 'H98',      unit: '',         color: '#34d399' },
+  { key: 'f_greenwald',      label: 'fGW',      unit: '',         color: '#f472b6' },
+  { key: 'ne_bar',           label: 'n̄e',       unit: '10²⁰/m³', color: '#60a5fa' },
+  { key: 'ne_ped',           label: 'ne,ped',   unit: '10²⁰/m³', color: '#818cf8' },
+  { key: 'te0',              label: 'Te0',      unit: 'keV',      color: '#f97316' },
+  { key: 'te_ped',           label: 'Te,ped',   unit: 'keV',      color: '#fb923c' },
+  { key: 'ne_line',          label: 'ne,line',  unit: '10²⁰/m³', color: '#67e8f9' },
+  { key: 'w_th',             label: 'Wth',      unit: 'MJ',       color: '#4ade80' },
+  { key: 'p_input',          label: 'Pin',      unit: 'MW',       color: '#facc15' },
+  { key: 'p_rad',            label: 'Prad',     unit: 'MW',       color: '#e879f9' },
+  { key: 'p_loss',           label: 'Ploss',    unit: 'MW',       color: '#c084fc' },
+  { key: 'v_loop',           label: 'Vloop',    unit: 'V',        color: '#2dd4bf' },
+  { key: 'neon_fraction',    label: 'fNe',      unit: '%',        color: '#86efac' },
+  { key: 'disruption_risk',  label: 'Drisk',    unit: '',         color: '#ef4444' },
 ]
+
+const DEFAULT_KEYS = new Set(['ip', 'beta_n', 'li', 'd_alpha'])
 
 const MARGIN_LEFT = 56
 const MARGIN_RIGHT = 64
@@ -37,6 +54,7 @@ interface Props {
   finished: boolean
   scrubIndex: number | null
   onScrub: (index: number | null) => void
+  elmActive: boolean
 }
 
 export default function UnifiedTracePanel({
@@ -47,9 +65,42 @@ export default function UnifiedTracePanel({
   finished,
   scrubIndex,
   onScrub,
+  elmActive,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set(DEFAULT_KEYS))
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!dropdownOpen) return
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [dropdownOpen])
+
+  // Active traces based on selection
+  const activeTraces = useMemo(() => {
+    return ALL_TRACES.filter((t) => selectedKeys.has(t.key))
+  }, [selectedKeys])
+
+  const toggleTrace = useCallback((key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key) // keep at least 1
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [])
 
   // Parse program & compute target traces (memoized)
   const targets = useMemo<TargetTraces | null>(() => {
@@ -81,7 +132,8 @@ export default function UnifiedTracePanel({
 
     const W = rect.width
     const H = rect.height
-    const numTraces = TRACES.length
+    const numTraces = activeTraces.length
+    if (numTraces === 0) return
     const ROW_H = H / numTraces
 
     // Clear
@@ -92,8 +144,11 @@ export default function UnifiedTracePanel({
     const tMax = duration > 0 ? duration : 10
     const toX = (t: number) => MARGIN_LEFT + (t / tMax) * plotW
 
+    // Find Dα row for ELM indicator
+    const dAlphaRowIdx = activeTraces.findIndex((t) => t.key === 'd_alpha')
+
     for (let row = 0; row < numTraces; row++) {
-      const cfg = TRACES[row]
+      const cfg = activeTraces[row]
       const y0 = row * ROW_H + MARGIN_TOP
       const h = ROW_H - MARGIN_TOP - MARGIN_BOTTOM
 
@@ -113,8 +168,12 @@ export default function UnifiedTracePanel({
       let vMin = Infinity
       let vMax = -Infinity
 
-      // Actual data values (always needed for drawing)
-      const vals = history.map((pt) => pt[cfg.key] as number)
+      // Scale neon_fraction to % for display
+      const isNeonPct = cfg.key === 'neon_fraction'
+      const vals = history.map((pt) => {
+        const v = pt[cfg.key] as number
+        return isNeonPct ? v * 100 : v
+      })
 
       // Target data range
       let targetPts: [number, number][] | null = null
@@ -208,7 +267,7 @@ export default function UnifiedTracePanel({
       // ── Current / scrubbed value readout ──
       const displayIdx = scrubIndex !== null ? scrubIndex : history.length - 1
       if (displayIdx >= 0 && displayIdx < history.length) {
-        const val = history[displayIdx][cfg.key] as number
+        const val = vals[displayIdx]
         ctx.fillStyle = cfg.color
         ctx.font = '11px monospace'
         ctx.textAlign = 'left'
@@ -220,6 +279,33 @@ export default function UnifiedTracePanel({
           y0 + h / 2,
         )
       }
+    }
+
+    // ── ELM indicator on Dα row (if visible) ──
+    if (elmActive && dAlphaRowIdx >= 0) {
+      const elmY = dAlphaRowIdx * ROW_H + 14
+      const elmX = W - MARGIN_RIGHT - 8
+      ctx.fillStyle = '#fbbf24' // amber
+      ctx.font = 'bold 11px monospace'
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'alphabetic'
+      ctx.globalAlpha = 0.9
+      ctx.fillText('ELM', elmX, elmY)
+      ctx.globalAlpha = 1
+    }
+
+    // ── ELM suppressed indicator on Dα row (if visible) ──
+    const lastPt = history[history.length - 1]
+    if (lastPt?.elm_suppressed && dAlphaRowIdx >= 0) {
+      const elmY = dAlphaRowIdx * ROW_H + 14
+      const elmX = W - MARGIN_RIGHT - 8
+      ctx.fillStyle = '#86efac' // green
+      ctx.font = 'bold 10px monospace'
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'alphabetic'
+      ctx.globalAlpha = 0.9
+      ctx.fillText('QCE', elmX, elmY)
+      ctx.globalAlpha = 1
     }
 
     // ── "Now" line or scrub line ──
@@ -269,9 +355,9 @@ export default function UnifiedTracePanel({
       const x = toX(t)
       ctx.fillText(`${t.toFixed(0)}`, x, totalH - 12)
     }
-  }, [history, duration, targets, scrubIndex])
+  }, [history, duration, targets, scrubIndex, elmActive, activeTraces])
 
-  // Redraw on data changes — history.length triggers redraws when array is mutated in place
+  // Redraw on data changes
   useEffect(() => {
     draw()
   }, [draw, history.length])
@@ -334,6 +420,46 @@ export default function UnifiedTracePanel({
         onMouseLeave={handleMouseLeave}
         style={{ cursor: finished && history.length > 0 ? 'crosshair' : 'default' }}
       />
+      {/* ── Trace selector dropdown ── */}
+      <div ref={dropdownRef} className="absolute top-1 right-1 z-10">
+        <button
+          onClick={() => setDropdownOpen((v) => !v)}
+          className="px-2 py-0.5 text-[10px] font-mono rounded
+                     bg-gray-800/80 text-gray-300 border border-gray-600/50
+                     hover:bg-gray-700/80 hover:text-white transition-colors"
+        >
+          Traces ({selectedKeys.size})
+        </button>
+        {dropdownOpen && (
+          <div
+            className="absolute right-0 top-full mt-1 w-48
+                        bg-gray-900 border border-gray-700 rounded shadow-lg
+                        max-h-60 overflow-y-auto"
+          >
+            {ALL_TRACES.map((t) => (
+              <label
+                key={t.key}
+                className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 cursor-pointer text-[11px] font-mono"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedKeys.has(t.key)}
+                  onChange={() => toggleTrace(t.key)}
+                  className="accent-cyan-500"
+                />
+                <span
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: t.color }}
+                />
+                <span className="text-gray-300">{t.label}</span>
+                {t.unit && (
+                  <span className="text-gray-500 ml-auto">{t.unit}</span>
+                )}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

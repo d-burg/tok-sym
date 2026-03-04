@@ -140,7 +140,7 @@ export default function ControlRoom() {
 
           {/* Speed selector */}
           <div className="flex rounded overflow-hidden border border-gray-700">
-            {[1.0, 0.75, 0.5].map((s) => (
+            {[4, 2, 1.0, 0.75, 0.5].map((s) => (
               <button
                 key={s}
                 onClick={() => handleSpeedChange(s)}
@@ -196,6 +196,7 @@ export default function ControlRoom() {
             finished={finished}
             scrubIndex={scrubIndex}
             onScrub={controls.setScrubIndex}
+            elmActive={displaySnapshot?.elm_active ?? false}
           />
         </div>
 

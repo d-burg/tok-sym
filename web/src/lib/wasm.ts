@@ -59,6 +59,8 @@ export interface DischargeProgram {
   p_ich: WaveformPoint[]
   kappa: WaveformPoint[]
   delta: WaveformPoint[]
+  d2_puff: WaveformPoint[]
+  neon_puff: WaveformPoint[]
   duration: number
 }
 

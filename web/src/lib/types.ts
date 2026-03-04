@@ -56,6 +56,13 @@ export interface Snapshot {
   h_factor: number
   in_hmode: boolean
   elm_active: boolean
+  elm_suppressed: boolean
+  ne_ped: number
+  te_ped: number
+  ne_line: number
+  neon_fraction: number
+  d2_puff: number
+  neon_puff: number
 
   // Disruption
   disruption_risk: number
@@ -71,6 +78,7 @@ export interface Snapshot {
   axis_z: number
   xpoint_r: number
   xpoint_z: number
+  is_limited: boolean
 
   // Status
   status: SimStatus
@@ -92,4 +100,11 @@ export interface TracePoint {
   li: number
   q95: number
   v_loop: number
+  h_factor: number
+  f_greenwald: number
+  ne_ped: number
+  te_ped: number
+  ne_line: number
+  neon_fraction: number
+  elm_suppressed: boolean
 }

@@ -164,6 +164,13 @@ export function useSimulation(
         li: snap.li,
         q95: snap.q95,
         v_loop: snap.diagnostics.v_loop,
+        h_factor: snap.h_factor,
+        f_greenwald: snap.f_greenwald,
+        ne_ped: snap.ne_ped,
+        te_ped: snap.te_ped,
+        ne_line: snap.ne_line,
+        neon_fraction: snap.neon_fraction,
+        elm_suppressed: snap.elm_suppressed,
       }
       historyRef.current.push(pt)
       if (historyRef.current.length > MAX_HISTORY) {

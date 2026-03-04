@@ -33,6 +33,10 @@ pub struct DischargeProgram {
     pub kappa: Vec<WaveformPoint>,
     /// Triangularity target (s, dimensionless)
     pub delta: Vec<WaveformPoint>,
+    /// D2 gas puff rate (s, 10²⁰ particles/s)
+    pub d2_puff: Vec<WaveformPoint>,
+    /// Neon impurity seeding rate (s, 10²⁰ particles/s)
+    pub neon_puff: Vec<WaveformPoint>,
     /// Total discharge duration (s)
     pub duration: f64,
 }
@@ -79,12 +83,14 @@ impl DischargeProgram {
             p_ich: Self::interpolate(&self.p_ich, t),
             kappa: Self::interpolate(&self.kappa, t),
             delta: Self::interpolate(&self.delta, t),
+            d2_puff: Self::interpolate(&self.d2_puff, t),
+            neon_puff: Self::interpolate(&self.neon_puff, t),
         }
     }
 
     /// Create a standard H-mode discharge program for a given device.
     pub fn standard_hmode(device: &Device) -> Self {
-        let ip_max = device.ip_max * 0.6; // 60% of max current
+        let ip_max = device.ip_max * 0.4; // 40% of max current (DIII-D: ~1.2 MA, q95 ≈ 3.6)
         let bt = device.bt_max * 0.9;
         let duration = 10.0;
 
@@ -132,6 +138,15 @@ impl DischargeProgram {
                 (1.0, device.delta_lower),
                 (duration, device.delta_lower),
             ],
+            d2_puff: vec![
+                (0.0, 0.0),
+                (0.3, 2.0),  // Gas puff during ramp-up
+                (2.0, 1.0),  // Reduce for H-mode pedestal fueling
+                (7.5, 1.0),
+                (8.5, 0.0),
+                (duration, 0.0),
+            ],
+            neon_puff: vec![(0.0, 0.0), (duration, 0.0)],
             duration,
         }
     }
@@ -169,6 +184,15 @@ impl DischargeProgram {
                 (1.0, device.delta_lower),
                 (duration, device.delta_lower),
             ],
+            d2_puff: vec![
+                (0.0, 0.0),
+                (0.3, 2.0),
+                (1.5, 2.0),
+                (6.0, 2.0),
+                (7.0, 0.0),
+                (duration, 0.0),
+            ],
+            neon_puff: vec![(0.0, 0.0), (duration, 0.0)],
             duration,
         }
     }
@@ -214,6 +238,16 @@ impl DischargeProgram {
                 (1.0, device.delta_lower),
                 (duration, device.delta_lower),
             ],
+            d2_puff: vec![
+                (0.0, 0.0),
+                (0.3, 3.0),
+                (2.0, 4.0),  // High gas puff pushing Greenwald limit
+                (5.0, 5.0),
+                (6.0, 3.0),
+                (7.0, 0.0),
+                (duration, 0.0),
+            ],
+            neon_puff: vec![(0.0, 0.0), (duration, 0.0)],
             duration,
         }
     }
@@ -253,6 +287,13 @@ pub struct SimulationSnapshot {
     pub h_factor: f64,
     pub in_hmode: bool,
     pub elm_active: bool,
+    pub elm_suppressed: bool,
+    pub ne_ped: f64,
+    pub te_ped: f64,
+    pub ne_line: f64,
+    pub neon_fraction: f64,
+    pub d2_puff: f64,
+    pub neon_puff: f64,
 
     // Disruption
     pub disruption_risk: f64,
@@ -633,6 +674,13 @@ impl Simulation {
             h_factor: self.transport.h_factor,
             in_hmode: self.transport.in_hmode,
             elm_active: self.transport.elm_active,
+            elm_suppressed: self.transport.elm_suppressed,
+            ne_ped: self.profiles.ne_ped,
+            te_ped: self.profiles.te_ped,
+            ne_line: self.profiles.ne_line_avg(),
+            neon_fraction: self.transport.neon_fraction,
+            d2_puff: prog.d2_puff,
+            neon_puff: prog.neon_puff,
             disruption_risk: self.disruption.risk,
             disrupted: self.disruption.disrupted,
             diagnostics,
