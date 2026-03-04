@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SimHandle, type PresetId, getPreset } from './wasm'
-import type { Snapshot, TracePoint } from './types'
+import type { Snapshot, TracePoint, ProfileFrame, ProcessedProfile } from './types'
+import { processProfileFrames } from './profileUtils'
 
 const DT = 0.005 // 5 ms physics timestep
 const MAX_HISTORY = 2000 // ring buffer length (~10 s at 200 Hz display)
@@ -15,6 +16,10 @@ export interface SimState {
   programJson: string                  // current discharge program JSON for target traces
   scrubIndex: number | null            // null = live, number = index into snapshotHistory
   finished: boolean                    // true when status is Complete or Disrupted
+  processedProfiles: ProcessedProfile[] | null  // null while running, populated post-discharge
+  profileTeMax: number
+  profileNeMax: number
+  profilePMax: number
 }
 
 export interface SimControls {
@@ -40,6 +45,8 @@ export function useSimulation(
   const programJsonRef = useRef<string>('{}')
   const speedRef = useRef(1.0)
   const stepAccRef = useRef(0.0)  // fractional step accumulator for sub-1x speeds
+  const profileFramesRef = useRef<ProfileFrame[]>([])
+  const lastProfileTimeRef = useRef<number>(-Infinity)
 
   const [state, setState] = useState<SimState>({
     snapshot: null,
@@ -51,6 +58,10 @@ export function useSimulation(
     programJson: '{}',
     scrubIndex: null,
     finished: false,
+    processedProfiles: null,
+    profileTeMax: 0,
+    profileNeMax: 0,
+    profilePMax: 0,
   })
 
   // Create a new sim handle from a preset
@@ -63,6 +74,8 @@ export function useSimulation(
     simRef.current = handle
     historyRef.current = []
     snapshotHistoryRef.current = []
+    profileFramesRef.current = []
+    lastProfileTimeRef.current = -Infinity
     wallJsonRef.current = handle.wall_outline_json()
 
     // Get the program JSON for target traces
@@ -80,6 +93,10 @@ export function useSimulation(
       programJson: programJsonRef.current,
       scrubIndex: null,
       finished: false,
+      processedProfiles: null,
+      profileTeMax: 0,
+      profileNeMax: 0,
+      profilePMax: 0,
     })
   }, [])
 
@@ -93,6 +110,8 @@ export function useSimulation(
     simRef.current = handle
     historyRef.current = []
     snapshotHistoryRef.current = []
+    profileFramesRef.current = []
+    lastProfileTimeRef.current = -Infinity
     wallJsonRef.current = handle.wall_outline_json()
     programJsonRef.current = programJson
 
@@ -107,6 +126,10 @@ export function useSimulation(
       programJson: programJsonRef.current,
       scrubIndex: null,
       finished: false,
+      processedProfiles: null,
+      profileTeMax: 0,
+      profileNeMax: 0,
+      profilePMax: 0,
     })
   }, [])
 
@@ -178,7 +201,7 @@ export function useSimulation(
         ne_ped: snap.ne_ped,
         te_ped: snap.te_ped,
         ne_line: snap.ne_line,
-        neon_fraction: snap.neon_fraction,
+        impurity_fraction: snap.impurity_fraction,
         elm_suppressed: snap.elm_suppressed,
       }
       historyRef.current.push(pt)
@@ -192,18 +215,48 @@ export function useSimulation(
         snapshotHistoryRef.current = snapshotHistoryRef.current.slice(-MAX_HISTORY)
       }
 
+      // Capture profile frame every 50ms for post-discharge viewing
+      if (snap.te_profile && snap.time - lastProfileTimeRef.current >= 0.05) {
+        profileFramesRef.current.push({
+          time: snap.time,
+          te_profile: [...snap.te_profile],
+          ne_profile: [...snap.ne_profile],
+          in_hmode: snap.in_hmode,
+        })
+        lastProfileTimeRef.current = snap.time
+      }
+
       const isFinished = snap.status === 'Complete' || snap.status === 'Disrupted'
 
-      setState({
-        snapshot: snap,
-        displaySnapshot: snap,
-        history: historyRef.current,
-        snapshotHistory: snapshotHistoryRef.current,
-        running: runningRef.current,
-        wallJson: wallJsonRef.current,
-        programJson: programJsonRef.current,
-        scrubIndex: null,
-        finished: isFinished,
+      setState((prev) => {
+        // Post-discharge: process accumulated profile frames (only once)
+        let processedProfiles = prev.processedProfiles
+        let profileTeMax = prev.profileTeMax
+        let profileNeMax = prev.profileNeMax
+        let profilePMax = prev.profilePMax
+        if (isFinished && !prev.processedProfiles && profileFramesRef.current.length > 0) {
+          const result = processProfileFrames(profileFramesRef.current)
+          processedProfiles = result.profiles
+          profileTeMax = result.teMax
+          profileNeMax = result.neMax
+          profilePMax = result.pMax
+        }
+
+        return {
+          snapshot: snap!,
+          displaySnapshot: snap!,
+          history: historyRef.current,
+          snapshotHistory: snapshotHistoryRef.current,
+          running: runningRef.current,
+          wallJson: wallJsonRef.current,
+          programJson: programJsonRef.current,
+          scrubIndex: null,
+          finished: isFinished,
+          processedProfiles,
+          profileTeMax,
+          profileNeMax,
+          profilePMax,
+        }
       })
     }
 
@@ -233,6 +286,8 @@ export function useSimulation(
     }
     historyRef.current = []
     snapshotHistoryRef.current = []
+    profileFramesRef.current = []
+    lastProfileTimeRef.current = -Infinity
     setState((s) => ({
       ...s,
       snapshot: null,
@@ -242,6 +297,10 @@ export function useSimulation(
       running: false,
       scrubIndex: null,
       finished: false,
+      processedProfiles: null,
+      profileTeMax: 0,
+      profileNeMax: 0,
+      profilePMax: 0,
     }))
   }, [])
 

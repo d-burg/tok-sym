@@ -1,10 +1,57 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { Snapshot } from '../lib/types'
+import type { ProcessedProfile } from '../lib/types'
+import ProfilePanel from './ProfilePanel'
 
 interface Props {
   snapshot: Snapshot | null
+  finished: boolean
+  processedProfiles: ProcessedProfile[] | null
+  profileTeMax: number
+  profileNeMax: number
+  profilePMax: number
+  displayTime: number | null
 }
 
-export default function StatusPanel({ snapshot }: Props) {
+export default function StatusPanel({
+  snapshot,
+  finished,
+  processedProfiles,
+  profileTeMax,
+  profileNeMax,
+  profilePMax,
+  displayTime,
+}: Props) {
+  const [showProfiles, setShowProfiles] = useState(false)
+  const [showPressure, setShowPressure] = useState(false)
+  const [showThomson, setShowThomson] = useState(true)
+
+  // Reset profile view when discharge resets
+  useEffect(() => {
+    if (!finished) {
+      setShowProfiles(false)
+    }
+  }, [finished])
+
+  // Can show profiles only after discharge finishes and profiles are processed
+  const canShowProfiles = finished && processedProfiles !== null && processedProfiles.length > 0
+
+  // Compute profile index from displayTime
+  const profileIndex = useMemo(() => {
+    if (!processedProfiles || processedProfiles.length === 0 || displayTime == null) return 0
+    // Find nearest profile frame to displayTime
+    let bestIdx = 0
+    let bestDist = Math.abs(processedProfiles[0].time - displayTime)
+    for (let i = 1; i < processedProfiles.length; i++) {
+      const dist = Math.abs(processedProfiles[i].time - displayTime)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestIdx = i
+      }
+    }
+    return bestIdx
+  }, [processedProfiles, displayTime])
+
   if (!snapshot) {
     return (
       <div className="p-3 font-mono text-sm text-gray-600 flex items-center justify-center h-full">
@@ -16,9 +63,9 @@ export default function StatusPanel({ snapshot }: Props) {
   const s = snapshot
 
   return (
-    <div className="px-3 py-1.5 font-mono text-xs h-full overflow-y-auto">
+    <div className="px-3 py-1.5 font-mono text-xs h-full overflow-y-auto flex flex-col">
       {/* Top row: mode badge + disruption risk */}
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-2 mb-1 shrink-0">
         <span
           className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
             s.disrupted
@@ -33,11 +80,65 @@ export default function StatusPanel({ snapshot }: Props) {
         {/* Disruption risk bar */}
         <DisruptionRisk risk={s.disruption_risk} snapshot={s} />
 
-        <span className="text-[10px] text-gray-500 ml-auto shrink-0">
-          {s.status}
-        </span>
+        {/* Profile toggle + status */}
+        <div className="flex items-center gap-1.5 ml-auto shrink-0">
+          {canShowProfiles && (
+            <>
+              <button
+                onClick={() => setShowProfiles(!showProfiles)}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
+                  showProfiles
+                    ? 'bg-purple-700 text-purple-200'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {showProfiles ? 'Params' : 'Profiles'}
+              </button>
+              {showProfiles && (
+                <>
+                  <label className="flex items-center gap-0.5 text-[10px] text-gray-500 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showThomson}
+                      onChange={(e) => setShowThomson(e.target.checked)}
+                      className="w-2.5 h-2.5 cursor-pointer"
+                    />
+                    TS
+                  </label>
+                  <label className="flex items-center gap-0.5 text-[10px] text-gray-500 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showPressure}
+                      onChange={(e) => setShowPressure(e.target.checked)}
+                      className="w-2.5 h-2.5 cursor-pointer"
+                    />
+                    P
+                  </label>
+                </>
+              )}
+            </>
+          )}
+          <span className="text-[10px] text-gray-500">
+            {s.status}
+          </span>
+        </div>
       </div>
 
+      {/* Profile view or Params view */}
+      {showProfiles && canShowProfiles ? (
+        <div className="flex-1 min-h-0">
+          <ProfilePanel
+            profiles={processedProfiles}
+            currentIndex={profileIndex}
+            teMax={profileTeMax}
+            neMax={profileNeMax}
+            pMax={profilePMax}
+            showThomson={showThomson}
+            showPressure={showPressure}
+          />
+        </div>
+      ) : (
+      <>
       {/* Params & Stability side by side */}
       <div className="grid grid-cols-2 gap-x-4 mb-1">
         {/* Column 1: Key parameters */}
@@ -78,6 +179,8 @@ export default function StatusPanel({ snapshot }: Props) {
           <PowerBar label="Pᵣₐd" value={s.p_rad} total={s.p_input} color="#ef4444" />
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }

@@ -222,7 +222,15 @@ export default function ControlRoom() {
 
         {/* Bottom row, cols 1-2: Status panel (extends under equilibrium) */}
         <div className="col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <StatusPanel snapshot={displaySnapshot} />
+          <StatusPanel
+            snapshot={displaySnapshot}
+            finished={finished}
+            processedProfiles={state.processedProfiles}
+            profileTeMax={state.profileTeMax}
+            profileNeMax={state.profileNeMax}
+            profilePMax={state.profilePMax}
+            displayTime={displaySnapshot?.time ?? null}
+          />
         </div>
 
         {/* Bottom-right: 3D port view */}

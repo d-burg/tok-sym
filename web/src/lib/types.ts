@@ -60,9 +60,13 @@ export interface Snapshot {
   ne_ped: number
   te_ped: number
   ne_line: number
-  neon_fraction: number
+  impurity_fraction: number
   d2_puff: number
   neon_puff: number
+
+  // Profiles (51-point arrays, rho = 0.00 to 1.00)
+  te_profile: number[]
+  ne_profile: number[]
 
   // Disruption
   disruption_risk: number
@@ -105,6 +109,24 @@ export interface TracePoint {
   ne_ped: number
   te_ped: number
   ne_line: number
-  neon_fraction: number
+  impurity_fraction: number
   elm_suppressed: boolean
+}
+
+/** Raw profile frame captured every 50ms during simulation. */
+export interface ProfileFrame {
+  time: number
+  te_profile: number[]  // 51 points
+  ne_profile: number[]  // 51 points
+  in_hmode: boolean
+}
+
+/** Post-processed profile with pre-generated Thomson scatter. */
+export interface ProcessedProfile {
+  time: number
+  te_profile: number[]
+  ne_profile: number[]
+  in_hmode: boolean
+  te_thomson: { rho: number; val: number }[]
+  ne_thomson: { rho: number; val: number }[]
 }

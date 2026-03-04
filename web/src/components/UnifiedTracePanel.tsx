@@ -33,7 +33,7 @@ const ALL_TRACES: TraceConfig[] = [
   { key: 'p_rad',            label: 'Prad',     unit: 'MW',       color: '#e879f9' },
   { key: 'p_loss',           label: 'Ploss',    unit: 'MW',       color: '#c084fc' },
   { key: 'v_loop',           label: 'Vloop',    unit: 'V',        color: '#2dd4bf' },
-  { key: 'neon_fraction',    label: 'fNe',      unit: '%',        color: '#86efac' },
+  { key: 'impurity_fraction',    label: 'fImp',     unit: '%',        color: '#86efac' },
   { key: 'disruption_risk',  label: 'Drisk',    unit: '',         color: '#ef4444' },
 ]
 
@@ -168,11 +168,11 @@ export default function UnifiedTracePanel({
       let vMin = Infinity
       let vMax = -Infinity
 
-      // Scale neon_fraction to % for display
-      const isNeonPct = cfg.key === 'neon_fraction'
+      // Scale impurity_fraction to % for display
+      const isImpurityPct = cfg.key === 'impurity_fraction'
       const vals = history.map((pt) => {
         const v = pt[cfg.key] as number
-        return isNeonPct ? v * 100 : v
+        return isImpurityPct ? v * 100 : v
       })
 
       // Target data range

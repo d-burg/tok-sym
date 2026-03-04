@@ -1,5 +1,25 @@
 use serde::{Deserialize, Serialize};
 
+/// Impurity seeding and ELM regime parameters (device-specific).
+///
+/// Named generically ("impurity") to support future noble gas species
+/// (argon, krypton, nitrogen) beyond the initial neon implementation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImpurityElmParams {
+    /// Impurity fraction threshold to start affecting Type I ELM frequency
+    pub impurity_type1_onset: f64,
+    /// Impurity fraction for Type I → Type II (grassy) transition
+    pub impurity_type2_threshold: f64,
+    /// Impurity fraction for full ELM suppression (QCE window)
+    pub impurity_qce_threshold: f64,
+    /// Impurity fraction above which radiative collapse begins
+    pub impurity_collapse_threshold: f64,
+    /// q95 range for grassy/Type II ELMs (min, max)
+    pub q95_grassy_range: (f64, f64),
+    /// Minimum delta (triangularity) for grassy ELMs
+    pub delta_grassy_min: f64,
+}
+
 /// Tokamak device geometry and operational parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
@@ -31,6 +51,8 @@ pub struct Device {
     pub wall_outline: Vec<(f64, f64)>,
     /// Magnetic configuration
     pub config: MagneticConfig,
+    /// Impurity seeding / ELM regime parameters
+    pub impurity_elm: ImpurityElmParams,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -145,6 +167,14 @@ pub fn diiid() -> Device {
         z_eff: 1.5,
         wall_outline: diiid_wall(),
         config: MagneticConfig::LowerSingleNull,
+        impurity_elm: ImpurityElmParams {
+            impurity_type1_onset: 0.0005,
+            impurity_type2_threshold: 0.001,
+            impurity_qce_threshold: 0.003,
+            impurity_collapse_threshold: 0.02,
+            q95_grassy_range: (6.0, 7.5),
+            delta_grassy_min: 0.4,
+        },
     }
 }
 
@@ -165,6 +195,14 @@ pub fn iter() -> Device {
         z_eff: 1.7,
         wall_outline: iter_wall(),
         config: MagneticConfig::LowerSingleNull,
+        impurity_elm: ImpurityElmParams {
+            impurity_type1_onset: 0.0003,
+            impurity_type2_threshold: 0.0008,
+            impurity_qce_threshold: 0.002,
+            impurity_collapse_threshold: 0.015,
+            q95_grassy_range: (4.5, 6.0),
+            delta_grassy_min: 0.3,
+        },
     }
 }
 

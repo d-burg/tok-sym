@@ -310,13 +310,17 @@ pub struct SimulationSnapshot {
     pub ne_ped: f64,
     pub te_ped: f64,
     pub ne_line: f64,
-    pub neon_fraction: f64,
+    pub impurity_fraction: f64,
     pub d2_puff: f64,
     pub neon_puff: f64,
 
     // Disruption
     pub disruption_risk: f64,
     pub disrupted: bool,
+
+    // Profiles (51-point arrays, ρ = 0.00 to 1.00)
+    pub te_profile: Vec<f64>,
+    pub ne_profile: Vec<f64>,
 
     // Diagnostics
     pub diagnostics: DiagnosticSignals,
@@ -496,6 +500,7 @@ impl Simulation {
             self.transport.te0,
             self.transport.ne0,
             self.transport.in_hmode,
+            dt,
         );
 
         // ── Update equilibrium shape ──
@@ -698,9 +703,11 @@ impl Simulation {
             ne_ped: self.profiles.ne_ped,
             te_ped: self.profiles.te_ped,
             ne_line: self.profiles.ne_line_avg(),
-            neon_fraction: self.transport.neon_fraction,
+            impurity_fraction: self.transport.impurity_fraction,
             d2_puff: prog.d2_puff,
             neon_puff: prog.neon_puff,
+            te_profile: self.profiles.te_profile_array(),
+            ne_profile: self.profiles.ne_profile_array(),
             disruption_risk: self.disruption.risk,
             disrupted: self.disruption.disrupted,
             diagnostics,

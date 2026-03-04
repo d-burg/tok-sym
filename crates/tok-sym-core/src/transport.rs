@@ -63,8 +63,9 @@ pub struct TransportModel {
     pub elm_rng_state: u64,
     /// Pre-computed next ELM period with stochastic jitter (s)
     pub elm_next_period: f64,
-    /// Neon impurity fraction (relative to electron density)
-    pub neon_fraction: f64,
+    /// Impurity fraction (relative to electron density) — currently neon,
+    /// generic to support future species (argon, krypton, nitrogen).
+    pub impurity_fraction: f64,
 }
 
 impl Default for TransportModel {
@@ -95,7 +96,7 @@ impl Default for TransportModel {
             elm_type: 0,
             elm_rng_state: 54321,
             elm_next_period: 0.0,
-            neon_fraction: 0.0,
+            impurity_fraction: 0.0,
         }
     }
 }
@@ -186,16 +187,16 @@ impl TransportModel {
         // Central density peaking factor ~1.3
         self.ne0 = self.ne_bar * 1.3;
 
-        // ── Neon fraction evolution ──
-        // Neon accumulates from seeding, decays via particle transport
-        let tau_neon = 0.5; // impurity confinement time (s)
-        let neon_source = if self.ne_bar > 0.05 {
+        // ── Impurity fraction evolution ──
+        // Impurity (currently neon) accumulates from seeding, decays via particle transport
+        let tau_impurity = 0.5; // impurity confinement time (s)
+        let impurity_source = if self.ne_bar > 0.05 {
             prog.neon_puff * 0.3 / (self.ne_bar * volume).max(0.01)
         } else {
             0.0
         };
-        self.neon_fraction += (neon_source - self.neon_fraction / tau_neon) * dt;
-        self.neon_fraction = self.neon_fraction.clamp(0.0, 0.1); // max 10% neon fraction
+        self.impurity_fraction += (impurity_source - self.impurity_fraction / tau_impurity) * dt;
+        self.impurity_fraction = self.impurity_fraction.clamp(0.0, 0.1); // max 10% impurity fraction
 
         // ── q95 ──
         // Cylindrical safety factor with shape correction
@@ -230,14 +231,24 @@ impl TransportModel {
         let p_brem = 5.35e-37 * ne_m3 * ne_m3 * z_eff * te_avg.sqrt() * volume * 1e-6; // MW
         // Line radiation (simplified: proportional to ne² at low Te)
         let p_line = p_brem * 0.3 * (z_eff - 1.0).max(0.0);
-        // Neon impurity radiation — effective 0D Lz coefficient.
+        // Impurity radiation — effective 0D Lz coefficient.
         // Physical Lz(Ne) peaks at ~5e-31 W·m³ near 0.5 keV, but in real tokamaks
         // neon concentrates in the edge/SOL, not the core volume. For our volume-
         // averaged model, we use ~50x lower effective Lz so that realistic seeding
         // rates (0.3–0.7 × 10²⁰/s) produce a few MW of radiation, not hundreds.
-        let lz_neon = 1.0e-32 * (1.0 + 0.5 * (te_avg - 1.0).abs()).max(0.5);
-        let p_neon = self.neon_fraction * ne_m3 * ne_m3 * lz_neon * volume * 1e-6; // MW
-        self.p_rad = p_brem + p_line + p_neon;
+        // (Future: Lz becomes species-dependent for argon, krypton, nitrogen, etc.)
+        let lz_impurity = 1.0e-32 * (1.0 + 0.5 * (te_avg - 1.0).abs()).max(0.5);
+        // Radiative collapse: radiation mantle moves inward at high impurity fraction
+        let imp = &device.impurity_elm;
+        let collapse_factor = if self.impurity_fraction > imp.impurity_collapse_threshold {
+            let excess = (self.impurity_fraction - imp.impurity_collapse_threshold)
+                / imp.impurity_collapse_threshold;
+            1.0 + 5.0 * excess
+        } else {
+            1.0
+        };
+        let p_impurity = self.impurity_fraction * ne_m3 * ne_m3 * lz_impurity * collapse_factor * volume * 1e-6; // MW
+        self.p_rad = p_brem + p_line + p_impurity;
         self.p_rad = self.p_rad.max(0.0);
 
         // ── L-H transition threshold ──
@@ -309,14 +320,23 @@ impl TransportModel {
         self.elm_energy_loss = 0.0;
         self.elm_type = 0;
 
-        // Determine ELM regime based on neon seeding level
-        self.elm_suppressed = self.in_hmode && self.neon_fraction >= 0.003;
+        // Determine ELM regime based on impurity level, q95, and shaping
+        let imp = &device.impurity_elm;
+        self.elm_suppressed = self.in_hmode
+            && self.impurity_fraction >= imp.impurity_qce_threshold
+            && prog.delta >= imp.delta_grassy_min;
         let elm_regime: u8 = if !self.in_hmode {
             0 // No ELMs outside H-mode
-        } else if self.neon_fraction >= 0.003 {
-            0 // Suppressed → QCE
-        } else if self.neon_fraction >= 0.001 {
-            2 // Type II (grassy, transitional)
+        } else if self.impurity_fraction >= imp.impurity_qce_threshold
+            && prog.delta >= imp.delta_grassy_min
+        {
+            0 // Suppressed → QCE (requires sufficient impurity + strong shaping)
+        } else if self.impurity_fraction >= imp.impurity_type2_threshold
+            && self.q95 >= imp.q95_grassy_range.0
+            && self.q95 <= imp.q95_grassy_range.1
+            && prog.delta >= imp.delta_grassy_min
+        {
+            2 // Type II (grassy) — requires impurity + specific q95 window + shaping
         } else {
             1 // Type I (standard large ELMs)
         };
@@ -325,11 +345,23 @@ impl TransportModel {
             self.elm_timer += dt;
             let power_excess = (net_heating / self.p_lh_threshold - 1.0).max(0.0);
 
+            // Impurity degradation factor: reduces Type I frequency as impurity
+            // approaches the Type II transition threshold (pedestal cooling effect)
+            let impurity_degradation = if self.impurity_fraction > imp.impurity_type1_onset {
+                let frac = ((self.impurity_fraction - imp.impurity_type1_onset)
+                    / (imp.impurity_type2_threshold - imp.impurity_type1_onset))
+                    .clamp(0.0, 1.0);
+                1.0 - 0.7 * frac // frequency drops to 30% before Type II transition
+            } else {
+                1.0
+            };
+
             // Pre-compute jittered period for the next ELM cycle if needed
             if self.elm_next_period <= 0.0 {
                 let (mean_freq, jitter_frac) = if elm_regime == 1 {
                     // Type I: 5–25 Hz, ±30% timing jitter
-                    (5.0 + 20.0 * power_excess.min(1.0), 0.3)
+                    // Impurity seeding degrades pedestal → lengthens inter-ELM period
+                    ((5.0 + 20.0 * power_excess.min(1.0)) * impurity_degradation, 0.3)
                 } else {
                     // Type II: 80–200 Hz, ±50% timing jitter
                     (80.0 + 120.0 * power_excess.min(1.0), 0.5)
