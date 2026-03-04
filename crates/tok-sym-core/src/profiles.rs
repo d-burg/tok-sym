@@ -53,6 +53,13 @@ pub struct Profiles {
     te0_lmode: f64,
     /// Core ne for L-mode (10²⁰ m⁻³)
     ne0_lmode: f64,
+    /// Smoothed core Te for ELM resilience (keV)
+    te0_core_smooth: f64,
+    /// Smoothed core ne for ELM resilience (10²⁰ m⁻³)
+    ne0_core_smooth: f64,
+    /// L↔H blend factor: 0.0 = fully L-mode shape, 1.0 = fully H-mode shape.
+    /// Ramps smoothly during transitions to avoid profile discontinuities.
+    pub blend: f64,
 }
 
 /// Evaluate tanh-pedestal profile at normalized radius ρ.
@@ -125,6 +132,9 @@ impl Default for Profiles {
             alpha_n: 1.0,
             te0_lmode: 2.0,
             ne0_lmode: 0.5,
+            te0_core_smooth: 2.0,
+            ne0_core_smooth: 0.5,
+            blend: 0.0,
         }
     }
 }
@@ -133,26 +143,23 @@ impl Profiles {
     /// Electron temperature at normalized radius ρ (0=axis, 1=edge), in keV.
     pub fn te(&self, rho: f64) -> f64 {
         let rho = rho.clamp(0.0, 1.0);
-        if self.h_mode {
-            tanh_profile(rho, &self.te_params).max(0.01)
-        } else {
-            // L-mode: simple parabolic from te0 to edge
+        let lmode = {
             let edge_te = 0.05;
-            (edge_te + (self.te0_lmode - edge_te) * (1.0 - rho.powi(2)).powf(self.alpha_t))
-                .max(0.01)
-        }
+            edge_te + (self.te0_lmode - edge_te) * (1.0 - rho.powi(2)).powf(self.alpha_t)
+        };
+        let hmode = tanh_profile(rho, &self.te_params);
+        (lmode * (1.0 - self.blend) + hmode * self.blend).max(0.01)
     }
 
     /// Electron density at normalized radius ρ (10²⁰ m⁻³).
     pub fn ne(&self, rho: f64) -> f64 {
         let rho = rho.clamp(0.0, 1.0);
-        if self.h_mode {
-            tanh_profile(rho, &self.ne_params).max(0.001)
-        } else {
+        let lmode = {
             let edge_ne = 0.05;
-            (edge_ne + (self.ne0_lmode - edge_ne) * (1.0 - rho.powi(2)).powf(self.alpha_n))
-                .max(0.001)
-        }
+            edge_ne + (self.ne0_lmode - edge_ne) * (1.0 - rho.powi(2)).powf(self.alpha_n)
+        };
+        let hmode = tanh_profile(rho, &self.ne_params);
+        (lmode * (1.0 - self.blend) + hmode * self.blend).max(0.001)
     }
 
     /// Te profile as a fixed-size array for snapshot serialization.
@@ -229,19 +236,86 @@ impl Profiles {
         sum / vol
     }
 
+    /// Compute internal inductance l_i from Te profile shape.
+    ///
+    /// Uses Spitzer conductivity: j(ρ) ∝ Te(ρ)^{3/2}, then integrates to get
+    /// enclosed current I(ρ) and poloidal field B_pol(ρ) ∝ I(ρ)/ρ.
+    /// l_i = ⟨B_pol²⟩ / B_pol(a)² measures current profile peaking.
+    pub fn compute_li(&self) -> f64 {
+        let n = 50;
+        let drho = 1.0 / n as f64;
+
+        // Step 1: Build enclosed current profile I(ρ) by integrating j ∝ Te^1.5
+        let mut i_enclosed = vec![0.0_f64; n + 1]; // I(ρ) at cell edges
+        for k in 0..n {
+            let rho = (k as f64 + 0.5) * drho; // midpoint
+            let j = self.te(rho).max(0.01).powf(1.5); // j ∝ Te^1.5
+            let d_current = j * 2.0 * rho * drho; // j · 2πρ dρ (2π cancels)
+            i_enclosed[k + 1] = i_enclosed[k] + d_current;
+        }
+
+        let i_total = i_enclosed[n];
+        if i_total < 1e-12 {
+            return 1.0; // fallback
+        }
+
+        // Step 2: Compute <B_pol²> volume average
+        // B_pol(ρ) ∝ I(ρ)/ρ, so B_pol² ∝ I(ρ)²/ρ²
+        let mut bp2_sum = 0.0;
+        let mut vol_sum = 0.0;
+        for k in 0..n {
+            let rho = (k as f64 + 0.5) * drho;
+            let i_mid = 0.5 * (i_enclosed[k] + i_enclosed[k + 1]);
+            let bp2 = if rho > 0.01 {
+                (i_mid / rho).powi(2)
+            } else {
+                0.0 // on-axis: B_pol → 0
+            };
+            let dv = 2.0 * rho * drho;
+            bp2_sum += bp2 * dv;
+            vol_sum += dv;
+        }
+
+        let bp2_avg = bp2_sum / vol_sum;
+        let bp2_edge = (i_total / 1.0).powi(2); // B_pol(ρ=1) ∝ I_total / 1
+
+        let li_raw = bp2_avg / bp2_edge;
+        li_raw.clamp(0.4, 2.0)
+    }
+
     /// Update profiles from 0D state variables.
     ///
     /// In H-mode, scales the tanh-pedestal parameters to match the 0D transport
     /// solution, with 200ms smoothing on pedestal evolution to prevent jitter.
+    /// Core Te/ne are smoothed with 150ms τ to insulate from fast ELM crashes.
     /// In L-mode, updates simple parabolic parameters.
     ///
     /// Transitions are handled smoothly:
     /// - L→H: pedestal starts at edge value and ramps up (200ms τ)
     /// - H→L: pedestal ramps down toward edge (100ms τ) before zeroing
-    pub fn update_from_0d(&mut self, te0: f64, ne0: f64, h_mode: bool, dt: f64) {
+    ///
+    /// `elm_ped_crash` is a fractional crash applied directly to the pedestal
+    /// when an ELM fires (0.0 = no ELM, >0 = pedestal drops by this fraction).
+    pub fn update_from_0d(&mut self, te0: f64, ne0: f64, h_mode: bool, dt: f64, elm_ped_crash: f64) {
         let l_to_h = h_mode && !self.prev_h_mode;
         self.h_mode = h_mode;
         self.prev_h_mode = h_mode;
+
+        // ── Blend factor: smooth transition between L-mode and H-mode shapes ──
+        let blend_target = if h_mode { 1.0 } else { 0.0 };
+        let tau_blend = if h_mode { 0.2 } else { 0.1 }; // 200ms L→H, 100ms H→L
+        let alpha_blend = (dt / tau_blend).min(1.0);
+        self.blend = (self.blend + (blend_target - self.blend) * alpha_blend).clamp(0.0, 1.0);
+
+        // ── Always update L-mode core values so they stay current for blending ──
+        self.te0_lmode = te0.max(0.01);
+        self.ne0_lmode = ne0.max(0.01);
+
+        // ── Smooth core tracking (used by both modes) ──
+        let tau_core = 0.15; // 150ms — slow enough to ride through ELM dips
+        let alpha_core = (dt / tau_core).min(1.0);
+        self.te0_core_smooth += (te0 - self.te0_core_smooth) * alpha_core;
+        self.ne0_core_smooth += (ne0 - self.ne0_core_smooth) * alpha_core;
 
         if h_mode {
             // On L→H transition: initialize pedestal at edge values so it
@@ -249,10 +323,12 @@ impl Profiles {
             if l_to_h {
                 self.te_params.ped = self.te_params.edge;
                 self.ne_params.ped = self.ne_params.edge;
+                self.te0_core_smooth = te0;
+                self.ne0_core_smooth = ne0;
             }
 
-            // Scale core to match 0D central Te
-            self.te_params.core = te0.max(0.1);
+            // Scale core to smoothed values (not raw te0/ne0)
+            self.te_params.core = self.te0_core_smooth.max(0.1);
 
             // Pedestal tracks core with realistic ratio, smoothed
             let target_te_ped = (0.35 * te0).max(0.3).min(te0 * 0.6);
@@ -262,16 +338,20 @@ impl Profiles {
             self.te_ped = self.te_params.ped;
 
             // Density: scale to match ne_bar from transport
-            let ne0_target = ne0 * 1.3; // peaking factor
+            let ne0_target = self.ne0_core_smooth * 1.3; // peaking factor, using smoothed value
             self.ne_params.core = ne0_target.max(0.05);
             let target_ne_ped = (0.7 * ne0_target).max(0.1);
             self.ne_params.ped += (target_ne_ped - self.ne_params.ped) * alpha;
             self.ne_ped = self.ne_params.ped;
-        } else {
-            // L-mode: set core values, edge handled by parabolic model
-            self.te0_lmode = te0.max(0.01);
-            self.ne0_lmode = ne0.max(0.01);
 
+            // ELM pedestal crash: applied instantaneously after smoothing
+            if elm_ped_crash > 0.0 {
+                self.te_params.ped *= (1.0 - elm_ped_crash).max(0.05);
+                self.ne_params.ped *= (1.0 - elm_ped_crash * 0.8).max(0.05); // ne crashes ~80% as much
+                self.te_ped = self.te_params.ped;
+                self.ne_ped = self.ne_params.ped;
+            }
+        } else {
             // Smooth pedestal ramp-down after H→L transition
             if self.te_params.ped > self.te_params.edge * 1.5 {
                 let tau_down = 0.1; // 100ms — back-transition is faster
@@ -336,6 +416,7 @@ mod tests {
     fn test_hmode_profiles() {
         let mut p = Profiles::default();
         p.h_mode = true;
+        p.blend = 1.0;
 
         // Core should be near te_params.core
         let te_core = p.te(0.0);
@@ -360,11 +441,11 @@ mod tests {
         let mut p = Profiles::default();
 
         // Transition to H-mode first (pedestal starts at edge)
-        p.update_from_0d(5.0, 0.8, true, 0.005);
+        p.update_from_0d(5.0, 0.8, true, 0.005, 0.0);
         let te_ped_1 = p.te_ped;
 
         // Large change in core Te — pedestal should be smoothed
-        p.update_from_0d(8.0, 0.8, true, 0.005);
+        p.update_from_0d(8.0, 0.8, true, 0.005, 0.0);
         let te_ped_2 = p.te_ped;
 
         // Pedestal should not jump instantly (smoothed by tau_ped = 0.2s)
@@ -381,12 +462,12 @@ mod tests {
         let mut p = Profiles::default();
         // Run several L-mode steps to fully ramp down the default pedestal
         for _ in 0..200 {
-            p.update_from_0d(3.0, 0.6, false, 0.005);
+            p.update_from_0d(3.0, 0.6, false, 0.005, 0.0);
         }
         assert_eq!(p.te_ped, 0.0);
 
         // Transition to H-mode — pedestal should start near edge, NOT at default 0.83
-        p.update_from_0d(3.0, 0.6, true, 0.005);
+        p.update_from_0d(3.0, 0.6, true, 0.005, 0.0);
         assert!(
             p.te_ped < 0.2,
             "On L→H transition, te_ped={} should start near edge (~0.07), not jump to H-mode default",
@@ -400,7 +481,7 @@ mod tests {
 
         // After many H-mode steps, pedestal should build up toward target
         for _ in 0..200 {
-            p.update_from_0d(3.0, 0.6, true, 0.005);
+            p.update_from_0d(3.0, 0.6, true, 0.005, 0.0);
         }
         assert!(
             p.te_ped > 0.5,
@@ -414,13 +495,13 @@ mod tests {
         let mut p = Profiles::default();
         // Establish H-mode with built-up pedestal
         for _ in 0..200 {
-            p.update_from_0d(4.0, 0.7, true, 0.005);
+            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0);
         }
         let te_ped_before = p.te_ped;
         assert!(te_ped_before > 0.5, "Pedestal should be well-established");
 
         // Transition to L-mode — pedestal should NOT zero instantly
-        p.update_from_0d(2.0, 0.5, false, 0.005);
+        p.update_from_0d(2.0, 0.5, false, 0.005, 0.0);
         assert!(
             p.te_ped > te_ped_before * 0.5,
             "On H→L transition, te_ped={} should not drop instantly from {}",
@@ -430,7 +511,7 @@ mod tests {
 
         // After many L-mode steps, pedestal should decay toward zero
         for _ in 0..100 {
-            p.update_from_0d(2.0, 0.5, false, 0.005);
+            p.update_from_0d(2.0, 0.5, false, 0.005, 0.0);
         }
         assert!(
             p.te_ped == 0.0 || p.te_ped < 0.15,
@@ -440,9 +521,50 @@ mod tests {
     }
 
     #[test]
+    fn test_elm_pedestal_crash() {
+        let mut p = Profiles::default();
+        // Build up H-mode with established pedestal
+        for _ in 0..400 {
+            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0);
+        }
+        let te_core_before = p.te_params.core;
+        let te_ped_before = p.te_params.ped;
+        let ne_ped_before = p.ne_params.ped;
+        assert!(te_ped_before > 0.5, "Pedestal should be well-established: {te_ped_before}");
+
+        // Apply ELM crash (15% pedestal crash fraction)
+        p.update_from_0d(3.6, 0.7, true, 0.001, 0.15);
+        let te_core_after = p.te_params.core;
+        let te_ped_after = p.te_params.ped;
+        let ne_ped_after = p.ne_params.ped;
+
+        // Core should barely change (smoothed with 150ms tau)
+        let core_change_frac = (te_core_after - te_core_before).abs() / te_core_before;
+        assert!(
+            core_change_frac < 0.05,
+            "Core should barely change during ELM: before={te_core_before:.3}, after={te_core_after:.3}, change={core_change_frac:.3}"
+        );
+
+        // Pedestal should drop significantly
+        let ped_drop_frac = (te_ped_before - te_ped_after) / te_ped_before;
+        assert!(
+            ped_drop_frac > 0.10,
+            "Te pedestal should crash during ELM: before={te_ped_before:.3}, after={te_ped_after:.3}, drop={ped_drop_frac:.3}"
+        );
+
+        // ne pedestal should also drop (at 80% of Te crash)
+        let ne_ped_drop_frac = (ne_ped_before - ne_ped_after) / ne_ped_before;
+        assert!(
+            ne_ped_drop_frac > 0.08,
+            "ne pedestal should crash during ELM: before={ne_ped_before:.3}, after={ne_ped_after:.3}, drop={ne_ped_drop_frac:.3}"
+        );
+    }
+
+    #[test]
     fn test_profile_arrays() {
         let mut p = Profiles::default();
         p.h_mode = true;
+        p.blend = 1.0;
 
         let te_arr = p.te_profile_array();
         let ne_arr = p.ne_profile_array();
@@ -459,6 +581,7 @@ mod tests {
     fn test_averages_hmode() {
         let mut p = Profiles::default();
         p.h_mode = true;
+        p.blend = 1.0;
         p.te_params.core = 5.0;
         p.te_params.ped = 1.5;
         p.ne_params.core = 0.8;
@@ -468,5 +591,63 @@ mod tests {
         assert!(te_avg > 0.0 && te_avg < p.te_params.core);
         let ne_avg = p.ne_vol_avg();
         assert!(ne_avg > 0.0 && ne_avg < p.ne_params.core);
+    }
+
+    #[test]
+    fn test_compute_li_lmode() {
+        // L-mode: peaked Te profile → higher l_i
+        let mut p = Profiles::default();
+        p.h_mode = false;
+        p.te_params.core = 3.0;
+        p.te_params.edge = 0.05;
+        let li = p.compute_li();
+        assert!(
+            li > 0.8 && li < 1.5,
+            "L-mode l_i should be 0.8-1.5, got {}",
+            li
+        );
+    }
+
+    #[test]
+    fn test_compute_li_hmode() {
+        // H-mode: broad Te with pedestal → lower l_i
+        let mut p = Profiles::default();
+        p.h_mode = true;
+        p.blend = 1.0;
+        p.te_params.core = 5.0;
+        p.te_params.ped = 1.5;
+        p.te_params.edge = 0.05;
+        let li = p.compute_li();
+        // H-mode broader Te → should give lower l_i than L-mode
+        assert!(
+            li > 0.4 && li < 1.2,
+            "H-mode l_i should be 0.4-1.2, got {}",
+            li
+        );
+    }
+
+    #[test]
+    fn test_compute_li_hmode_lower_than_lmode() {
+        // H-mode (broad Te) should have lower l_i than L-mode (peaked Te)
+        let mut lmode = Profiles::default();
+        lmode.h_mode = false;
+        lmode.te_params.core = 3.0;
+        lmode.te_params.edge = 0.05;
+
+        let mut hmode = Profiles::default();
+        hmode.h_mode = true;
+        hmode.blend = 1.0;
+        hmode.te_params.core = 5.0;
+        hmode.te_params.ped = 1.5;
+        hmode.te_params.edge = 0.05;
+
+        let li_lmode = lmode.compute_li();
+        let li_hmode = hmode.compute_li();
+        assert!(
+            li_lmode > li_hmode,
+            "L-mode l_i ({}) should be > H-mode l_i ({})",
+            li_lmode,
+            li_hmode
+        );
     }
 }

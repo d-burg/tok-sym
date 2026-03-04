@@ -278,6 +278,20 @@ impl DisruptionModel {
         }
     }
 
+    /// Force an immediate disruption (e.g., due to wall contact).
+    /// Uses a very short precursor since wall contact is sudden.
+    pub fn force_disruption(&mut self) {
+        if self.disrupted {
+            return;
+        }
+        self.disrupted = true;
+        self.risk = 1.0;
+        self.phase = Some(DisruptionPhase::Precursor {
+            remaining: 0.005, // 5ms — very fast for wall contact
+            amplitude: 1.0,   // Immediate large locked mode
+        });
+    }
+
     /// Reset the disruption model for a new discharge.
     pub fn reset(&mut self) {
         self.risk = 0.0;

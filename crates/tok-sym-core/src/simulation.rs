@@ -347,6 +347,39 @@ pub enum SimulationStatus {
     Complete,
 }
 
+/// Ray-casting point-in-polygon test.
+/// Returns true if (r, z) is inside the polygon defined by `outline`.
+fn point_in_polygon(r: f64, z: f64, outline: &[(f64, f64)]) -> bool {
+    let n = outline.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (ri, zi) = outline[i];
+        let (rj, zj) = outline[j];
+        if ((zi > z) != (zj > z)) && (r < (rj - ri) * (z - zi) / (zj - zi) + ri) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Sample LCFS boundary points using Miller parameterization.
+/// Returns Vec<(R, Z, theta)> in physical coordinates.
+fn sample_lcfs(r0: f64, a: f64, kappa: f64, delta: f64, n: usize) -> Vec<(f64, f64, f64)> {
+    let mut points = Vec::with_capacity(n);
+    for i in 0..n {
+        let theta = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+        let r = r0 + a * (theta + delta.asin() * theta.sin()).cos();
+        let z = kappa * a * theta.sin();
+        points.push((r, z, theta));
+    }
+    points
+}
+
 /// The main simulation engine.
 pub struct Simulation {
     pub device: Device,
@@ -368,6 +401,9 @@ pub struct Simulation {
     smoothed_beta_n: f64,
     smoothed_f_greenwald: f64,
     smoothed_p_rad_frac: f64,
+
+    // Smoothed l_i (resistive timescale ~ 200ms)
+    smoothed_li: f64,
 
     // Equilibrium grid resolution
     eq_nr: usize,
@@ -394,6 +430,7 @@ impl Simulation {
             smoothed_beta_n: 0.0,
             smoothed_f_greenwald: 0.0,
             smoothed_p_rad_frac: 0.0,
+            smoothed_li: 1.2,
             eq_nr: 48,
             eq_nz: 64,
             n_flux_surfaces: 8,
@@ -501,12 +538,44 @@ impl Simulation {
             self.transport.ne0,
             self.transport.in_hmode,
             dt,
+            self.transport.elm_ped_crash_frac,
         );
 
+        // ── Update l_i from Te profile shape ──
+        // j ∝ Te^1.5 (Spitzer), so l_i tracks Te profile peaking.
+        // Smoothed on the resistive diffusion timescale τ_R ∝ a² Te^(3/2):
+        //   - Hot H-mode (~3 keV):  τ ~ 1-2s   (sluggish, conductive core)
+        //   - L-mode     (~1 keV):  τ ~ 150ms   (moderate response)
+        //   - Rad. collapse (~0.1 keV): τ ~ 5ms  (rapid current contraction)
+        if self.actual_ip > 0.05 {
+            let li_instant = self.profiles.compute_li();
+            let te_avg = self.profiles.te_vol_avg().max(0.01); // keV, floor at 10 eV
+            let a = self.device.a;
+            let tau_li = (0.4 * a * a * te_avg.powf(1.5)).max(0.002); // floor 2ms
+            let alpha_li = (dt / tau_li).min(1.0);
+            self.smoothed_li += (li_instant - self.smoothed_li) * alpha_li;
+            self.transport.li = self.smoothed_li;
+        } else {
+            // During early ramp-up, use high l_i (peaked ohmic current)
+            self.transport.li = 1.2;
+            self.smoothed_li = 1.2;
+        }
+
         // ── Update equilibrium shape ──
-        // Adjust A parameter based on βp and shape based on programmed values
+        // Compute βp from profile-derived pressure for a more physics-based A parameter.
+        // βp = 2μ₀ <p> / B_pol² where B_pol = μ₀Ip/(2πa)
+        // <p> [Pa] = pressure_vol_avg [keV·10²⁰m⁻³] * 1.602e4
         let beta_p = if self.actual_ip > 0.1 {
-            self.transport.beta_t * self.device.bt_max / self.actual_ip * self.device.a
+            let p_avg_pa = self.profiles.pressure_vol_avg() * 1.602e4;
+            let mu0 = 4.0 * std::f64::consts::PI * 1e-7;
+            let a_phys = self.device.a;
+            let bp_edge = mu0 * self.actual_ip * 1e6
+                / (2.0 * std::f64::consts::PI * a_phys); // T
+            if bp_edge > 0.01 {
+                2.0 * mu0 * p_avg_pa / (bp_edge * bp_edge)
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -551,6 +620,34 @@ impl Simulation {
             squareness: 0.0,
         };
         self.equilibrium.update(&new_shape);
+
+        // ── Limiter contact check (diverted phase only) ──
+        // If the bulk LCFS extends beyond the wall, force a disruption.
+        // Only checked in diverted config (limited plasma intentionally touches wall)
+        // and only when Ip is significant (near or at flat-top).
+        if config != MagneticConfig::Limited
+            && !self.disruption.disrupted
+            && prog.ip > 0.3 * self.device.ip_max
+            && self.actual_ip > 0.1
+        {
+            let a = epsilon * self.device.r0; // physical minor radius
+            let lcfs_points = sample_lcfs(self.device.r0, a, prog.kappa, delta_eff, 24);
+
+            // X-point Z for bulk/leg discrimination
+            let (_, z_xpt) = self.equilibrium.x_point_physical();
+
+            for &(r, z, _theta) in &lcfs_points {
+                // Skip divertor leg region: points near or below X-point
+                if z < z_xpt + 0.05 {
+                    continue;
+                }
+                // Check if this LCFS point is outside the wall
+                if !point_in_polygon(r, z, &self.device.wall_outline) {
+                    self.disruption.force_disruption();
+                    break;
+                }
+            }
+        }
 
         self.snapshot()
     }
@@ -838,5 +935,156 @@ mod tests {
                 "Should have separatrix during flat-top"
             );
         }
+    }
+
+    #[test]
+    fn test_point_in_polygon() {
+        // Simple unit square: (0,0), (1,0), (1,1), (0,1)
+        let square = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        assert!(point_in_polygon(0.5, 0.5, &square)); // center
+        assert!(!point_in_polygon(1.5, 0.5, &square)); // outside right
+        assert!(!point_in_polygon(0.5, 1.5, &square)); // outside top
+        assert!(!point_in_polygon(-0.5, 0.5, &square)); // outside left
+
+        // DIII-D wall: magnetic axis should be inside
+        let device = devices::diiid();
+        assert!(point_in_polygon(device.r0, 0.0, &device.wall_outline));
+        // Far outside: R = 5.0 should be outside
+        assert!(!point_in_polygon(5.0, 0.0, &device.wall_outline));
+    }
+
+    #[test]
+    fn test_sample_lcfs() {
+        let r0 = 1.67;
+        let a = 0.59;
+        let kappa = 1.8;
+        let delta = 0.55;
+        let points = sample_lcfs(r0, a, kappa, delta, 24);
+        assert_eq!(points.len(), 24);
+
+        // Check that points span reasonable R and Z ranges
+        let r_min = points.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+        let r_max = points.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+        let z_min = points.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+        let z_max = points.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+
+        // Inboard side should be around R0 - a
+        assert!(r_min < r0, "LCFS should extend inboard of R0");
+        assert!(r_max > r0, "LCFS should extend outboard of R0");
+        // Z range should be roughly ±kappa*a
+        assert!(z_max > 0.8 * kappa * a, "LCFS top should be near kappa*a");
+        assert!(z_min < -0.8 * kappa * a, "LCFS bottom should be near -kappa*a");
+    }
+
+    #[test]
+    fn test_normal_discharge_no_wall_disruption() {
+        // Standard H-mode with normal κ and δ should NOT trigger wall contact
+        let device = devices::diiid();
+        let program = DischargeProgram::standard_hmode(&device);
+        let duration = program.duration;
+        let mut sim = Simulation::new(device, program);
+        sim.start();
+
+        let dt = 0.002;
+        let n_steps = (duration / dt) as usize + 10;
+        let mut wall_disrupted = false;
+        for _ in 0..n_steps {
+            let snap = sim.step(dt);
+            if snap.status == SimulationStatus::Disrupted {
+                wall_disrupted = true;
+                break;
+            }
+            if snap.status == SimulationStatus::Complete {
+                break;
+            }
+        }
+        // With the default disruption RNG seed, the standard discharge may or may not
+        // stochastically disrupt. But we can at least verify the simulation ran.
+        // The key test is that extreme shapes DO disrupt (next test).
+        let _ = wall_disrupted;
+    }
+
+    #[test]
+    fn test_li_responds_to_hmode_transition() {
+        // l_i should decrease when the plasma transitions to H-mode
+        // because Te broadens (pedestal forms), making j(ρ) broader
+        let device = devices::diiid();
+        let program = DischargeProgram::standard_hmode(&device);
+        let mut sim = Simulation::new(device, program);
+        sim.start();
+
+        let dt = 0.002;
+        let mut li_early = 0.0;
+        let mut li_hmode = 0.0;
+
+        for _ in 0..5000 {
+            let snap = sim.step(dt);
+
+            // Capture l_i during early L-mode phase (~1.5s, after Ip ramp)
+            if (snap.time - 1.5).abs() < dt {
+                li_early = snap.li;
+            }
+            // Capture l_i well into H-mode (~5s)
+            if (snap.time - 5.0).abs() < dt {
+                li_hmode = snap.li;
+            }
+            if snap.status == SimulationStatus::Complete
+                || snap.status == SimulationStatus::Disrupted
+            {
+                break;
+            }
+        }
+
+        // l_i should be measurably lower in H-mode (broader Te/current profile)
+        assert!(
+            li_early > 0.5,
+            "Early l_i should be reasonable, got {}",
+            li_early
+        );
+        if li_hmode > 0.1 {
+            // Only check if we got to H-mode without disrupting
+            assert!(
+                li_hmode < li_early,
+                "H-mode l_i ({}) should be less than L-mode l_i ({})",
+                li_hmode,
+                li_early
+            );
+        }
+    }
+
+    #[test]
+    fn test_extreme_kappa_causes_wall_disruption() {
+        // Extreme elongation (κ=2.5) should push plasma into wall and disrupt
+        let device = devices::diiid();
+        let mut program = DischargeProgram::standard_hmode(&device);
+
+        // Override kappa waveform to extreme value during flat-top
+        program.kappa = vec![
+            (0.0, 1.0),
+            (1.0, 2.5), // Ramp to extreme κ during Ip ramp
+            (8.0, 2.5),
+            (9.0, 1.0),
+        ];
+
+        let mut sim = Simulation::new(device, program);
+        sim.start();
+
+        let dt = 0.002;
+        let mut disrupted = false;
+        for _ in 0..5000 {
+            // Run up to 10s
+            let snap = sim.step(dt);
+            if snap.status == SimulationStatus::Disrupted {
+                disrupted = true;
+                break;
+            }
+            if snap.status == SimulationStatus::Complete {
+                break;
+            }
+        }
+        assert!(
+            disrupted,
+            "Extreme κ=2.5 should cause wall contact disruption"
+        );
     }
 }

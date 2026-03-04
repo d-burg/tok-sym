@@ -52,6 +52,8 @@ pub struct TransportModel {
     pub elm_active: bool,
     /// ELM energy loss fraction
     pub elm_energy_loss: f64,
+    /// Pedestal crash fraction for profile coupling (amplified from global energy loss)
+    pub elm_ped_crash_frac: f64,
     /// Whether ELMs are suppressed (e.g., by neon seeding / QCE regime)
     pub elm_suppressed: bool,
     /// ELM display cooldown (s) — keeps elm_active true for multiple timesteps
@@ -91,6 +93,7 @@ impl Default for TransportModel {
             elm_timer: 0.0,
             elm_active: false,
             elm_energy_loss: 0.0,
+            elm_ped_crash_frac: 0.0,
             elm_suppressed: false,
             elm_cooldown: 0.0,
             elm_type: 0,
@@ -204,9 +207,7 @@ impl TransportModel {
         self.q95 = self.q95.max(1.0);
 
         // ── Internal inductance ──
-        // Parameterized: li ≈ 0.8 + 0.4 * (1 - Ip_fraction)
-        let ip_frac = ip / device.ip_max;
-        self.li = 0.8 + 0.4 * (1.0 - ip_frac).max(0.0);
+        // (computed from Te profile shape in Simulation::step())
 
         // ── Greenwald fraction ──
         let n_greenwald = device.greenwald_density(ip);
@@ -318,6 +319,7 @@ impl TransportModel {
             self.elm_active = false;
         }
         self.elm_energy_loss = 0.0;
+        self.elm_ped_crash_frac = 0.0;
         self.elm_type = 0;
 
         // Determine ELM regime based on impurity level, q95, and shaping
@@ -386,7 +388,10 @@ impl TransportModel {
                     let elm_fraction = (0.05 + 0.08 * power_excess.min(1.0))
                         * (0.8 + 0.4 * rng_amp); // ±20% amplitude variation
                     self.elm_energy_loss = elm_fraction * self.w_th;
+                    self.elm_ped_crash_frac = elm_fraction * 2.5; // amplified for pedestal
                     self.w_th *= 1.0 - elm_fraction;
+                    // ELM particle loss: density drops ~50% as much as energy
+                    self.ne_bar *= 1.0 - elm_fraction * 0.5;
                 } else {
                     // Type II: small crash, 2 ms cooldown for grassy appearance
                     self.elm_type = 2;
@@ -394,7 +399,10 @@ impl TransportModel {
                     let elm_fraction = (0.005 + 0.01 * power_excess.min(1.0))
                         * (0.6 + 0.8 * rng_amp); // wider amplitude variation
                     self.elm_energy_loss = elm_fraction * self.w_th;
+                    self.elm_ped_crash_frac = elm_fraction * 2.0; // amplified for pedestal
                     self.w_th *= 1.0 - elm_fraction;
+                    // ELM particle loss (smaller for Type II)
+                    self.ne_bar *= 1.0 - elm_fraction * 0.4;
                 }
             }
         } else if self.elm_suppressed {

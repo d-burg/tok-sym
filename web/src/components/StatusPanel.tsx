@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import type { Snapshot } from '../lib/types'
 import type { ProcessedProfile } from '../lib/types'
 import ProfilePanel from './ProfilePanel'
@@ -144,23 +144,23 @@ export default function StatusPanel({
         {/* Column 1: Key parameters */}
         <div>
           <div className="text-[10px] text-gray-500 mb-0.5">Plasma parameters</div>
-          <Param label="Iₚ" value={s.ip} unit="MA" />
-          <Param label="Bₜ" value={s.bt} unit="T" />
-          <Param label="Tₑ₀" value={s.te0} unit="keV" />
-          <Param label="n̄ₑ" value={s.ne_bar} unit="10²⁰" />
-          <Param label="Wₜₕ" value={s.w_th} unit="MJ" precision={2} />
-          <Param label="τE" value={s.tau_e} unit="s" precision={3} />
+          <Param label={<>I<sub>p</sub></>} value={s.ip} unit="MA" />
+          <Param label={<>B<sub>t</sub></>} value={s.bt} unit="T" />
+          <Param label={<>T<sub>e0</sub></>} value={s.te0} unit="keV" />
+          <Param label={<>n̄<sub>e</sub></>} value={s.ne_bar} unit="10²⁰" />
+          <Param label={<>W<sub>th</sub></>} value={s.w_th} unit="MJ" precision={2} />
+          <Param label={<>τ<sub>E</sub></>} value={s.tau_e} unit="s" precision={3} />
         </div>
 
         {/* Column 2: Stability & confinement */}
         <div>
           <div className="text-[10px] text-gray-500 mb-0.5">Stability</div>
-          <Param label="q₉₅" value={s.q95} unit="" warn={s.q95 < 2.5} danger={s.q95 < 2.0} />
-          <Param label="βN" value={s.beta_n} unit="" warn={s.beta_n > 2.5} danger={s.beta_n > 2.8} />
-          <Param label="fGW" value={s.f_greenwald} unit="" warn={s.f_greenwald > 0.8} danger={s.f_greenwald > 0.9} />
-          <Param label="H₉₈" value={s.h_factor} unit="" />
-          <Param label="li" value={s.li} unit="" />
-          <Param label="Vₗₒₒₚ" value={s.diagnostics.v_loop} unit="V" precision={3} />
+          <Param label={<>q<sub>95</sub></>} value={s.q95} unit="" warn={s.q95 < 2.5} danger={s.q95 < 2.0} />
+          <Param label={<>β<sub>N</sub></>} value={s.beta_n} unit="" warn={s.beta_n > 2.5} danger={s.beta_n > 2.8} />
+          <Param label={<>f<sub>GW</sub></>} value={s.f_greenwald} unit="" warn={s.f_greenwald > 0.8} danger={s.f_greenwald > 0.9} />
+          <Param label={<>H<sub>98</sub></>} value={s.h_factor} unit="" />
+          <Param label={<>l<sub>i</sub></>} value={s.li} unit="" />
+          <Param label={<>V<sub>loop</sub></>} value={s.diagnostics.v_loop} unit="V" precision={3} />
         </div>
       </div>
 
@@ -173,10 +173,10 @@ export default function StatusPanel({
           </span>
         </div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-          <PowerBar label="Pₒₕ" value={s.p_ohmic} total={s.p_input} color="#6b7280" />
-          <PowerBar label="Pₙᵦᵢ" value={s.prog_p_nbi} total={s.p_input} color="#3b82f6" />
-          <PowerBar label="Pₑcₕ" value={s.prog_p_ech} total={s.p_input} color="#8b5cf6" />
-          <PowerBar label="Pᵣₐd" value={s.p_rad} total={s.p_input} color="#ef4444" />
+          <PowerBar label={<>P<sub>OH</sub></>} value={s.p_ohmic} total={s.p_input} color="#6b7280" />
+          <PowerBar label={<>P<sub>NBI</sub></>} value={s.prog_p_nbi} total={s.p_input} color="#3b82f6" />
+          <PowerBar label={<>P<sub>ECH</sub></>} value={s.prog_p_ech} total={s.p_input} color="#8b5cf6" />
+          <PowerBar label={<>P<sub>rad</sub></>} value={s.p_rad} total={s.p_input} color="#ef4444" />
         </div>
       </div>
       </>
@@ -192,11 +192,11 @@ function DisruptionRisk({ risk, snapshot }: { risk: number; snapshot: Snapshot }
     pct > 80 ? '#ef4444' : pct > 60 ? '#f97316' : pct > 30 ? '#eab308' : '#22c55e'
 
   // Risk factor values (same metrics used by the disruption model)
-  const factors = [
-    { label: 'fGW', value: snapshot.f_greenwald, warn: 0.8, danger: 0.9 },
-    { label: 'βN', value: snapshot.beta_n, warn: 2.5, danger: 2.8 },
-    { label: 'q95', value: snapshot.q95, warn: 2.5, danger: 2.0, invert: true },
-    { label: 'Prad/Pin', value: snapshot.p_input > 0 ? snapshot.p_rad / snapshot.p_input : 0, warn: 0.7, danger: 0.85 },
+  const factors: { label: React.ReactNode; value: number; warn: number; danger: number; invert?: boolean }[] = [
+    { label: <span>f<sub>GW</sub></span>, value: snapshot.f_greenwald, warn: 0.8, danger: 0.9 },
+    { label: <span>β<sub>N</sub></span>, value: snapshot.beta_n, warn: 2.5, danger: 2.8 },
+    { label: <span>q<sub>95</sub></span>, value: snapshot.q95, warn: 2.5, danger: 2.0, invert: true },
+    { label: <span>P<sub>rad</sub>/P<sub>in</sub></span>, value: snapshot.p_input > 0 ? snapshot.p_rad / snapshot.p_input : 0, warn: 0.7, danger: 0.85 },
   ]
 
   return (
@@ -220,12 +220,12 @@ function DisruptionRisk({ risk, snapshot }: { risk: number; snapshot: Snapshot }
 
       {/* Risk factors inline */}
       <div className="flex items-center gap-2 text-[10px] min-w-0">
-        {factors.map((f) => {
+        {factors.map((f, idx) => {
           const isDanger = f.invert ? f.value < f.danger : f.value > f.danger
           const isWarn = f.invert ? f.value < f.warn : f.value > f.warn
           const color = isDanger ? 'text-red-400' : isWarn ? 'text-yellow-400' : 'text-gray-500'
           return (
-            <span key={f.label} className={`${color} whitespace-nowrap`}>
+            <span key={idx} className={`${color} whitespace-nowrap`}>
               {f.label}={f.value.toFixed(2)}
             </span>
           )
@@ -243,7 +243,7 @@ function Param({
   warn = false,
   danger = false,
 }: {
-  label: string
+  label: React.ReactNode
   value: number
   unit: string
   precision?: number
@@ -268,7 +268,7 @@ function PowerBar({
   total,
   color,
 }: {
-  label: string
+  label: React.ReactNode
   value: number
   total: number
   color: string
