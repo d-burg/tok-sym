@@ -67,6 +67,8 @@ pub struct Profiles {
 /// Direct port of OMFIT `Hmode_profiles` parameterization:
 ///   - tanh pedestal region centered at `xphalf` with half-width `widthp/2`
 ///   - core peaking above the tanh baseline via `(1 - (ρ/ρ_ped)^expin)^expout`
+///
+/// All parameters (xphalf, widthp, etc.) are defined in ρ space.
 fn tanh_profile(rho: f64, p: &ProfileParams) -> f64 {
     let w_e1 = 0.5 * p.widthp;
     let xphalf = p.xphalf;
@@ -91,36 +93,70 @@ fn tanh_profile(rho: f64, p: &ProfileParams) -> f64 {
     }
 }
 
-/// Default DIII-D H-mode Te profile parameters.
-fn default_te_params() -> ProfileParams {
+/// Default DIII-D H-mode Te profile parameters (keV, ρ grid).
+pub fn diiid_te_params() -> ProfileParams {
     ProfileParams {
-        edge: 0.07,
-        ped: 0.83,
-        core: 2.5,
-        expin: 1.1,
-        expout: 0.9,
+        edge: 0.07,   // 70 eV
+        ped: 0.83,    // 830 eV
+        core: 2.5,    // 2.5 keV
+        expin: 1.6,
+        expout: 1.5,
         widthp: 0.048,
         xphalf: 0.975,
     }
 }
 
-/// Default DIII-D H-mode ne profile parameters (10²⁰ m⁻³).
-fn default_ne_params() -> ProfileParams {
+/// Default DIII-D H-mode ne profile parameters (10²⁰ m⁻³, ρ grid).
+pub fn diiid_ne_params() -> ProfileParams {
     ProfileParams {
-        edge: 0.009,
-        ped: 0.30,
-        core: 0.55,
-        expin: 1.0,
+        edge: 0.09,   // 9.0e18 m⁻³
+        ped: 0.30,    // 3.0e19 m⁻³
+        core: 0.55,   // 5.5e19 m⁻³
+        expin: 1.5,
         expout: 1.5,
         widthp: 0.06,
         xphalf: 0.975,
     }
 }
 
-impl Default for Profiles {
-    fn default() -> Self {
-        let te = default_te_params();
-        let ne = default_ne_params();
+/// Default ITER H-mode Te profile parameters (keV, ρ grid).
+///
+/// Scaled from DIII-D: higher temperatures, slightly wider pedestal.
+/// ITER baseline H-mode: Te_core ~ 25 keV, Te_ped ~ 4-5 keV.
+pub fn iter_te_params() -> ProfileParams {
+    ProfileParams {
+        edge: 0.10,   // 100 eV (higher SOL Te)
+        ped: 4.5,     // ~4.5 keV pedestal
+        core: 25.0,   // ~25 keV on axis
+        expin: 1.6,
+        expout: 1.5,
+        widthp: 0.04, // slightly narrower pedestal in ρ
+        xphalf: 0.96,
+    }
+}
+
+/// Default ITER H-mode ne profile parameters (10²⁰ m⁻³, ρ grid).
+///
+/// ITER baseline: ne_core ~ 1.0e20, ne_ped ~ 0.7-0.8e20 (high density).
+pub fn iter_ne_params() -> ProfileParams {
+    ProfileParams {
+        edge: 0.15,   // 1.5e19 m⁻³
+        ped: 0.75,    // 7.5e19 m⁻³
+        core: 1.05,   // 1.05e20 m⁻³
+        expin: 1.5,
+        expout: 1.5,
+        widthp: 0.05,
+        xphalf: 0.96,
+    }
+}
+
+impl Profiles {
+    /// Create profiles with device-specific defaults.
+    pub fn for_device(device_id: &str) -> Self {
+        let (te, ne) = match device_id {
+            "iter" => (iter_te_params(), iter_ne_params()),
+            _ => (diiid_te_params(), diiid_ne_params()), // DIII-D is the fallback
+        };
         Profiles {
             te_ped: te.ped,
             ne_ped: ne.ped,
@@ -139,13 +175,23 @@ impl Default for Profiles {
     }
 }
 
+impl Default for Profiles {
+    /// Default is DIII-D profiles (backward compatible).
+    fn default() -> Self {
+        Profiles::for_device("diiid")
+    }
+}
+
 impl Profiles {
     /// Electron temperature at normalized radius ρ (0=axis, 1=edge), in keV.
     pub fn te(&self, rho: f64) -> f64 {
         let rho = rho.clamp(0.0, 1.0);
         let lmode = {
             let edge_te = 0.05;
-            edge_te + (self.te0_lmode - edge_te) * (1.0 - rho.powi(2)).powf(self.alpha_t)
+            // Clamp core ≥ edge to prevent hollow profiles during ramp-up/down
+            // (when transport te0 drops below edge temperature)
+            let core = self.te0_lmode.max(edge_te);
+            edge_te + (core - edge_te) * (1.0 - rho.powi(2)).powf(self.alpha_t)
         };
         let hmode = tanh_profile(rho, &self.te_params);
         (lmode * (1.0 - self.blend) + hmode * self.blend).max(0.01)
@@ -156,7 +202,8 @@ impl Profiles {
         let rho = rho.clamp(0.0, 1.0);
         let lmode = {
             let edge_ne = 0.05;
-            edge_ne + (self.ne0_lmode - edge_ne) * (1.0 - rho.powi(2)).powf(self.alpha_n)
+            let core = self.ne0_lmode.max(edge_ne);
+            edge_ne + (core - edge_ne) * (1.0 - rho.powi(2)).powf(self.alpha_n)
         };
         let hmode = tanh_profile(rho, &self.ne_params);
         (lmode * (1.0 - self.blend) + hmode * self.blend).max(0.001)
@@ -374,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_tanh_profile_basic() {
-        let p = default_te_params();
+        let p = diiid_te_params();
         let axis = tanh_profile(0.0, &p);
         let ped = tanh_profile(p.xphalf - 0.5 * p.widthp, &p);
         let edge = tanh_profile(1.0, &p);
@@ -474,8 +521,8 @@ mod tests {
             p.te_ped
         );
         assert!(
-            p.ne_ped < 0.05,
-            "On L→H transition, ne_ped={} should start near edge (~0.009)",
+            p.ne_ped < 0.15,
+            "On L→H transition, ne_ped={} should start near edge (~0.09)",
             p.ne_ped
         );
 

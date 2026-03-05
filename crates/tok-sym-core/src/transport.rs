@@ -390,8 +390,10 @@ impl TransportModel {
                     self.elm_energy_loss = elm_fraction * self.w_th;
                     self.elm_ped_crash_frac = elm_fraction * 2.5; // amplified for pedestal
                     self.w_th *= 1.0 - elm_fraction;
-                    // ELM particle loss: density drops ~50% as much as energy
-                    self.ne_bar *= 1.0 - elm_fraction * 0.5;
+                    // ELM particle loss: ΔN/N is ~15% of ΔW/W for Type I.
+                    // Real ELM particle losses are small vs total inventory;
+                    // fueling easily compensates so ne_bar trends monotonically.
+                    self.ne_bar *= 1.0 - elm_fraction * 0.15;
                 } else {
                     // Type II: small crash, 2 ms cooldown for grassy appearance
                     self.elm_type = 2;
@@ -402,7 +404,7 @@ impl TransportModel {
                     self.elm_ped_crash_frac = elm_fraction * 2.0; // amplified for pedestal
                     self.w_th *= 1.0 - elm_fraction;
                     // ELM particle loss (smaller for Type II)
-                    self.ne_bar *= 1.0 - elm_fraction * 0.4;
+                    self.ne_bar *= 1.0 - elm_fraction * 0.10;
                 }
             }
         } else if self.elm_suppressed {

@@ -1,7 +1,9 @@
 import type { ProfileFrame, ProcessedProfile } from './types'
 
-export const THOMSON_POINTS = 40
-export const THOMSON_SCATTER = 0.10 // ±10%
+export const THOMSON_POINTS = 45
+// Base scatter ±5%; actual scatter scales with local profile value
+// so core (high Te/ne) is noisier and edge (low Te/ne) is tighter.
+export const THOMSON_SCATTER_BASE = 0.05
 
 /** Simple xorshift PRNG for reproducible Thomson scatter noise. */
 export function xorshift(seed: number): () => number {
@@ -74,8 +76,15 @@ export function processProfileFrames(frames: ProfileFrame[]): {
     const te_thomson: { rho: number; val: number }[] = []
     const ne_thomson: { rho: number; val: number }[] = []
 
+    // Find peak profile values for this frame (for relative scatter scaling)
+    const tePeak = Math.max(...te, 0.01)
+    const nePeak = Math.max(...ne, 0.001)
+
     for (let i = 0; i < THOMSON_POINTS; i++) {
-      const rho = 0.03 + rng() * 0.94 // range 0.03 to 0.97
+      // Non-uniform radial distribution: denser at edge (like DIII-D edge Thomson).
+      // Map uniform r → rho = r^0.6 which concentrates points toward rho=1.
+      const r = 0.03 + rng() * 0.94 // uniform in [0.03, 0.97]
+      const rho = Math.pow(r, 0.6) // shifts distribution toward edge
 
       // Interpolate profile at this rho
       const idx = rho * (nRho - 1)
@@ -85,14 +94,18 @@ export function processProfileFrames(frames: ProfileFrame[]): {
       const teVal = te[lo] * (1 - f) + te[hi] * f
       const neVal = ne[lo] * (1 - f) + ne[hi] * f
 
-      // Add Gaussian scatter
+      // Profile-dependent scatter: noise scales with local value / peak.
+      // Core (high values) → larger scatter; edge (low values) → tighter.
+      const teSigma = THOMSON_SCATTER_BASE + 0.10 * (teVal / tePeak)
+      const neSigma = THOMSON_SCATTER_BASE + 0.10 * (neVal / nePeak)
+
       te_thomson.push({
         rho,
-        val: teVal * (1 + gaussian(rng, THOMSON_SCATTER)),
+        val: teVal * (1 + gaussian(rng, teSigma)),
       })
       ne_thomson.push({
         rho,
-        val: neVal * (1 + gaussian(rng, THOMSON_SCATTER)),
+        val: neVal * (1 + gaussian(rng, neSigma)),
       })
     }
 

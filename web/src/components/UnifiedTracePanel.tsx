@@ -13,6 +13,7 @@ interface TraceConfig {
   color: string
   targetKey?: 'ip' | 'beta_n'
   clampToTarget?: boolean
+  yMax?: number // hard ceiling for y-axis (e.g. q95 ≤ 10)
 }
 
 const ALL_TRACES: TraceConfig[] = [
@@ -20,7 +21,7 @@ const ALL_TRACES: TraceConfig[] = [
   { key: 'beta_n',           label: 'βN',       unit: '',         color: '#fbbf24', targetKey: 'beta_n', clampToTarget: true },
   { key: 'li',               label: 'li',       unit: '',         color: '#38bdf8' },
   { key: 'd_alpha',          label: 'Dα',       unit: 'a.u.',     color: '#fb7185' },
-  { key: 'q95',              label: 'q95',      unit: '',         color: '#a78bfa' },
+  { key: 'q95',              label: 'q95',      unit: '',         color: '#a78bfa', yMax: 10 },
   { key: 'h_factor',         label: 'H98',      unit: '',         color: '#34d399' },
   { key: 'f_greenwald',      label: 'fGW',      unit: '',         color: '#f472b6' },
   { key: 'ne_bar',           label: 'n̄e',       unit: '10²⁰/m³', color: '#60a5fa' },
@@ -206,6 +207,10 @@ export default function UnifiedTracePanel({
       if (vMax - vMin < 1e-10) {
         vMin -= 0.5
         vMax += 0.5
+      }
+      // Apply hard y-axis ceiling if configured (e.g. q95 ≤ 10)
+      if (cfg.yMax !== undefined && vMax > cfg.yMax) {
+        vMax = cfg.yMax
       }
       // Add 10% padding
       const range = vMax - vMin

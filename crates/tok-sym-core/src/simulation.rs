@@ -417,12 +417,13 @@ impl Simulation {
         let equilibrium = CerfonEquilibrium::from_device(&device)
             .expect("Should be able to solve equilibrium for device");
 
+        let profiles = Profiles::for_device(&device.id);
         Simulation {
             program,
             time: 0.0,
             status: SimulationStatus::Ready,
             transport: TransportModel::default(),
-            profiles: Profiles::default(),
+            profiles,
             disruption: DisruptionModel::default(),
             equilibrium,
             _noise: NoiseGen::new(12345),
@@ -448,7 +449,7 @@ impl Simulation {
         self.time = 0.0;
         self.status = SimulationStatus::Ready;
         self.transport = TransportModel::default();
-        self.profiles = Profiles::default();
+        self.profiles = Profiles::for_device(&self.device.id);
         self.disruption.reset();
         self.actual_ip = 0.0;
         self.smoothed_beta_n = 0.0;
@@ -543,20 +544,30 @@ impl Simulation {
 
         // ── Update l_i from Te profile shape ──
         // j ∝ Te^1.5 (Spitzer), so l_i tracks Te profile peaking.
-        // Smoothed on the resistive diffusion timescale τ_R ∝ a² Te^(3/2):
-        //   - Hot H-mode (~3 keV):  τ ~ 1-2s   (sluggish, conductive core)
-        //   - L-mode     (~1 keV):  τ ~ 150ms   (moderate response)
-        //   - Rad. collapse (~0.1 keV): τ ~ 5ms  (rapid current contraction)
-        if self.actual_ip > 0.05 {
+        // The current redistribution time τ_CR ≈ τ_R / n² where τ_R = μ₀σa²
+        // is the global resistive diffusion time and n ~ 3-4 is the lowest-order
+        // peaking mode. Coefficient 2.0 reproduces experimental τ_CR:
+        //   - DIII-D H-mode (~3 keV): τ ~ 3.6s  (sluggish, ELMs filtered out)
+        //   - DIII-D L-mode (~1 keV):  τ ~ 0.7s  (moderate response)
+        //   - Rad. collapse (~0.1 keV): τ ~ 22ms (rapid current contraction)
+        //   - ITER H-mode  (~10 keV): τ ~ 250s   (l_i nearly frozen, as expected)
+        // Below 0.1 MA use default l_i (no meaningful current profile yet).
+        // Between 0.1–0.3 MA, blend smoothly to avoid display transients.
+        if self.actual_ip > 0.1 {
             let li_instant = self.profiles.compute_li();
             let te_avg = self.profiles.te_vol_avg().max(0.01); // keV, floor at 10 eV
             let a = self.device.a;
-            let tau_li = (0.4 * a * a * te_avg.powf(1.5)).max(0.002); // floor 2ms
+            let tau_li = (2.0 * a * a * te_avg.powf(1.5)).max(0.005); // floor 5ms
             let alpha_li = (dt / tau_li).min(1.0);
-            self.smoothed_li += (li_instant - self.smoothed_li) * alpha_li;
+            // Blend from default (1.2) toward computed l_i as Ip ramps up.
+            // Below 0.3 MA the current profile is poorly established; at 0.3 MA
+            // we trust the profile-derived value fully.
+            let ip_weight = ((self.actual_ip - 0.1) / 0.2).clamp(0.0, 1.0);
+            let li_target = li_instant * ip_weight + 1.2 * (1.0 - ip_weight);
+            self.smoothed_li += (li_target - self.smoothed_li) * alpha_li;
             self.transport.li = self.smoothed_li;
         } else {
-            // During early ramp-up, use high l_i (peaked ohmic current)
+            // During early ramp-up / late ramp-down: default peaked-ohmic value
             self.transport.li = 1.2;
             self.smoothed_li = 1.2;
         }
@@ -1007,7 +1018,9 @@ mod tests {
     #[test]
     fn test_li_responds_to_hmode_transition() {
         // l_i should decrease when the plasma transitions to H-mode
-        // because Te broadens (pedestal forms), making j(ρ) broader
+        // because Te broadens (pedestal forms), making j(ρ) broader.
+        // Note: τ_li ≈ 3.6s at Te ~ 3 keV, so we need to wait several
+        // seconds after H-mode onset to see the effect.
         let device = devices::diiid();
         let program = DischargeProgram::standard_hmode(&device);
         let mut sim = Simulation::new(device, program);
@@ -1020,12 +1033,12 @@ mod tests {
         for _ in 0..5000 {
             let snap = sim.step(dt);
 
-            // Capture l_i during early L-mode phase (~1.5s, after Ip ramp)
-            if (snap.time - 1.5).abs() < dt {
+            // Capture l_i during L-mode phase (~3.0s, Ip flat-top but before H-mode effects)
+            if (snap.time - 3.0).abs() < dt {
                 li_early = snap.li;
             }
-            // Capture l_i well into H-mode (~5s)
-            if (snap.time - 5.0).abs() < dt {
+            // Capture l_i well into H-mode flat-top (~8.0s, several τ_li later)
+            if (snap.time - 8.0).abs() < dt {
                 li_hmode = snap.li;
             }
             if snap.status == SimulationStatus::Complete
