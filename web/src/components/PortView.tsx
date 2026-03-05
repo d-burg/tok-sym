@@ -517,9 +517,26 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       return
     }
 
-    const lcfs = subsample(snapshot.separatrix.points, 35)
+    const lcfsRaw = subsample(snapshot.separatrix.points, 35)
     const elmActive = snapshot.elm_active
     const disrupted = snapshot.disrupted
+    const xpZ = snapshot.xpoint_z
+
+    // ── Poloidal clipping: only render LCFS above the X-point ──
+    // During ramp-up/ramp-down, the equilibrium is evolving rapidly and the
+    // LCFS contour below the X-point can produce erroneous glowing strips
+    // that cross the vacuum region.  We clip the contour to points whose Z
+    // is above the X-point (with a small margin) unless the plasma is in
+    // stationary H-mode with visible divertor legs — in that case the lower
+    // separatrix region is rendered via the divertor-leg ribbons instead.
+    const showBelowXpt = snapshot.in_hmode && snapshot.xpoint_r > 0 && !disrupted
+    const lcfs = lcfsRaw.filter(([, Z]) => {
+      // If we have a valid x-point, clip points that are far below it
+      if (xpZ < -0.01 && !showBelowXpt) {
+        return Z > xpZ + 0.02  // small margin to keep contour smooth at x-point
+      }
+      return true
+    })
 
     // ── Step 1: Build projection grid ──
     const nSlicesPlasma = portCfg.nPlasmaSlices
@@ -637,7 +654,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       // Draw concentric emission RINGS (annuli) peaked at the separatrix.
       // Each ring is the area between innerScale and outerScale contours,
       // rendered with evenodd fill so the interior stays transparent.
-      // For SOL shells (outerScale > 1), clamp the inboard side.
+      //
+      // Inboard clamping: on the inboard side (sx < centX), scaling outward
+      // pushes contours into the gap between separatrix and center-stack
+      // wall, creating an erroneous glowing strip.  We aggressively clamp
+      // any outward expansion on the inboard side for all shells.
       for (const shell of EMISSION_SHELLS) {
         const shellAlpha = sliceAlpha * shell.weight
         if (shellAlpha < 0.0003) continue
@@ -652,12 +673,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           let sx = centX + (p.sx - centX) * shell.outerScale
           let sy = centY + (p.sy - centY) * shell.outerScale
 
-          // For SOL shells expanding outward, clamp the inboard side
-          if (shell.outerScale > 1.0 && sx < centX) {
-            const excess = shell.outerScale - 1.0
-            const clampScale = 1.0 + excess * 0.3
-            sx = centX + (p.sx - centX) * clampScale
-            sy = centY + (p.sy - centY) * clampScale
+          // Inboard clamping: don't let any shell expand outward past the
+          // separatrix on the inboard side — restrict to ≤1.0 scale there
+          if (sx < centX && shell.outerScale > 1.0) {
+            sx = centX + (p.sx - centX) * 1.0
+            sy = centY + (p.sy - centY) * 1.0
           }
 
           if (!started) { oCtx.moveTo(sx, sy); started = true }
@@ -825,20 +845,16 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     }
     const strikeFade = strikeGlowRef.current
 
-    // Wall illumination: smooth toroidal glow band at each strike point.
-    // Instead of sampling discrete wall points (which creates visible hot spots),
-    // sweep the strike-point positions toroidally and draw accumulated glow.
-    // The toroidal accumulation naturally creates a continuous bright band
-    // matching what a camera would see from line-integrated emission.
+    // Wall illumination: localized warm glow on divertor tiles near strike points.
+    // Small radius — should not extend much beyond the divertor leg width.
+    // Brighter than before, but tightly confined to the plate region.
     if (strikePointRZ.length > 0 && strikeFade > 0.001) {
       const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
-      const illumAlpha = 0.06 * powerScale * strikeFade
+      const illumAlpha = 0.10 * powerScale * strikeFade  // brighter than before (was 0.06)
 
       if (illumAlpha > 0.001) {
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
-        // Sweep strike points toroidally — use the same phi slices as plasma
-        // so the glow accumulates along sight lines just like the plasma does.
         for (const [spR, spZ] of strikePointRZ) {
           for (const s of sliceOrder) {
             const phi = phis[s]
@@ -847,17 +863,15 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
             if (!p2d) continue
 
             const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-            // No pathFactor — wall plate radiation is Lambertian (uniform),
-            // not line-integrated like plasma emission.
             const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6)
             if (gAlpha < 0.001) continue
 
-            // Larger, softer glow — blends into a continuous band
-            const glowR = 10 + depthFrac * 14
+            // Tight glow radius — comparable to divertor leg width on screen
+            const glowR = 5 + depthFrac * 7  // was 10+14 — now half the size
             const grad = ctx.createRadialGradient(p2d.sx, p2d.sy, 0, p2d.sx, p2d.sy, glowR)
-            grad.addColorStop(0, `rgba(255,180,100,${(gAlpha * 0.8).toFixed(4)})`)
-            grad.addColorStop(0.35, `rgba(200,100,40,${(gAlpha * 0.3).toFixed(4)})`)
-            grad.addColorStop(1, 'rgba(120,50,15,0)')
+            grad.addColorStop(0, `rgba(255,190,120,${(gAlpha * 1.0).toFixed(4)})`)
+            grad.addColorStop(0.4, `rgba(220,120,50,${(gAlpha * 0.4).toFixed(4)})`)
+            grad.addColorStop(1, 'rgba(140,60,20,0)')
             ctx.fillStyle = grad
             ctx.fillRect(p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
           }
@@ -867,9 +881,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     }
 
     // ── Step 4: Strike point glow on divertor plates ──
+    // Localized, bright glow at the strike-point locations.  Should be
+    // comparable in width to the divertor legs — no wider.
     if (strikePointRZ.length > 0 && strikeFade > 0.001) {
       const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
-      const strikeAlpha = 0.12 * powerScale * opacityScale * strikeFade
+      const strikeAlpha = 0.20 * powerScale * opacityScale * strikeFade  // brighter (was 0.12)
 
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
@@ -881,20 +897,19 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           if (!p2d) continue
 
           const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-          // No pathFactor — plate radiation is Lambertian (uniform ring),
-          // not line-integrated like plasma emission.
           const gAlpha = strikeAlpha * (0.5 + depthFrac * 0.5)
           if (gAlpha < 0.001) continue
 
-          const glowR = 12 + depthFrac * 18
+          // Tight glow — matches divertor leg width on screen
+          const glowR = 6 + depthFrac * 8  // was 12+18 — now half the size
           const grad = ctx.createRadialGradient(
             p2d.sx, p2d.sy, 0,
             p2d.sx, p2d.sy, glowR,
           )
-          grad.addColorStop(0, `rgba(255,210,150,${(gAlpha * 1.5).toFixed(4)})`)
-          grad.addColorStop(0.25, `rgba(255,150,80,${gAlpha.toFixed(4)})`)
-          grad.addColorStop(0.55, `rgba(220,90,30,${(gAlpha * 0.4).toFixed(4)})`)
-          grad.addColorStop(1, 'rgba(150,40,10,0)')
+          grad.addColorStop(0, `rgba(255,220,170,${(gAlpha * 2.0).toFixed(4)})`)
+          grad.addColorStop(0.3, `rgba(255,160,90,${(gAlpha * 1.2).toFixed(4)})`)
+          grad.addColorStop(0.6, `rgba(230,100,40,${(gAlpha * 0.4).toFixed(4)})`)
+          grad.addColorStop(1, 'rgba(160,50,15,0)')
           ctx.fillStyle = grad
           ctx.fillRect(p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
         }
