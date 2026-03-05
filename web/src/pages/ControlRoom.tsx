@@ -235,7 +235,7 @@ export default function ControlRoom() {
 
         {/* Bottom-right: 3D port view */}
         <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <PortView snapshot={plasmaSnapshot} limiterPoints={limiterPoints} />
+          <PortView snapshot={plasmaSnapshot} limiterPoints={limiterPoints} deviceId={activeDevice} />
         </div>
       </div>
 
