@@ -5,6 +5,168 @@ interface Props {
   snapshot: Snapshot | null
   limiterPoints?: [number, number][]
   deviceId?: string
+  wallJson?: string     // fallback wall outline for non-DIII-D devices
+  deviceR0?: number     // major radius for default port config
+  deviceA?: number      // minor radius for default port config
+}
+
+// ── Per-device diagnostic port configuration ─────────────────────────────
+// Models the camera sitting inside a cylindrical diagnostic port on the
+// outboard midplane, looking inward through a circular opening in the wall.
+
+interface PortConfig {
+  portR: number         // R where port meets vessel wall (outboard midplane)
+  portZ: number         // Z of port center (0 = midplane)
+  portRadius: number    // port cylinder radius (m)
+  portLength: number    // length from vessel wall to camera (m)
+  portPhi: number       // toroidal angle of port center
+  camR: number          // camera R (= portR + portLength)
+  camZ: number          // camera Z
+  camPhi: number        // camera toroidal angle
+  lookR: number         // look-at R (near magnetic axis)
+  lookZ: number         // look-at Z
+  lookPhi: number       // look-at toroidal angle
+  fov: number           // field of view (degrees)
+  tileColor: [number, number, number]  // base RGB for wall tiles
+  tileGridSpacing: { poloidal: number; toroidal: number }
+  tileGridDarken: number  // brightness reduction on grid lines (0–1)
+  phiMin: number        // wall toroidal sweep range (full 360°)
+  phiMax: number
+  plasmaPhiMin: number  // plasma toroidal sweep (narrower — only visible range)
+  plasmaPhiMax: number
+  nWallSlices: number
+  nPlasmaSlices: number
+}
+
+function defaultPortConfig(r0: number, a: number): PortConfig {
+  const portR = r0 + a * 0.95     // just inside outermost wall
+  const portLength = a * 0.25     // camera very close behind wall
+  const fov = 80                   // wide-angle ~18mm equivalent — fits wall height
+  // Port radius large enough that the rim is outside the camera FOV
+  const portRadius = Math.tan((fov / 2) * Math.PI / 180) * portLength * 1.4
+  return {
+    portR,
+    portZ: 0,
+    portRadius,
+    portLength,
+    portPhi: 0,
+    camR: portR + portLength,
+    camZ: 0.04,
+    camPhi: 0,
+    lookR: r0 * 0.65,
+    lookZ: -0.02,
+    lookPhi: 0.25,
+    fov,
+    tileColor: [32, 32, 34],
+    tileGridSpacing: { poloidal: 0.12, toroidal: 0.10 },
+    tileGridDarken: 0.25,
+    phiMin: -Math.PI,
+    phiMax: Math.PI,
+    plasmaPhiMin: -1.40,
+    plasmaPhiMax: 1.40,
+    nWallSlices: 100,
+    nPlasmaSlices: 80,
+  }
+}
+
+const PORT_CONFIGS: Record<string, PortConfig> = {
+  diiid: {
+    portR: 2.35,
+    portZ: 0,
+    portRadius: 0.42,     // tan(40°)*0.25*1.4 — rim outside 80° FOV
+    portLength: 0.25,     // camera very close behind the wall
+    portPhi: 0,
+    camR: 2.60,           // portR + portLength
+    camZ: 0.04,
+    camPhi: 0,
+    lookR: 1.10,
+    lookZ: -0.02,
+    lookPhi: 0.28,        // turned right — more toroidal angle
+    fov: 80,              // wide-angle ~18mm — fits wall vertically
+    tileColor: [28, 28, 30],       // dark matte carbon
+    tileGridSpacing: { poloidal: 0.10, toroidal: 0.08 },
+    tileGridDarken: 0.30,
+    phiMin: -Math.PI,
+    phiMax: Math.PI,
+    plasmaPhiMin: -1.40,
+    plasmaPhiMax: 1.40,
+    nWallSlices: 100,
+    nPlasmaSlices: 80,
+  },
+  iter: {
+    portR: 8.30,
+    portZ: 0,
+    portRadius: 0.60,     // tan(40°)*0.35*1.4 — rim outside 80° FOV
+    portLength: 0.35,     // camera close behind wall
+    portPhi: 0,
+    camR: 8.65,           // portR + portLength
+    camZ: 0.06,
+    camPhi: 0,
+    lookR: 4.00,
+    lookZ: -0.03,
+    lookPhi: 0.22,        // turned right
+    fov: 80,              // wide-angle ~18mm — fits wall vertically
+    tileColor: [38, 36, 32],       // boronized tungsten
+    tileGridSpacing: { poloidal: 0.15, toroidal: 0.12 },
+    tileGridDarken: 0.25,
+    phiMin: -Math.PI,
+    phiMax: Math.PI,
+    plasmaPhiMin: -1.40,
+    plasmaPhiMax: 1.40,
+    nWallSlices: 100,
+    nPlasmaSlices: 80,
+  },
+  sparc: {
+    portR: 2.10,
+    portZ: 0,
+    portRadius: 0.35,     // tan(40°)*0.20*1.4 — rim outside 80° FOV
+    portLength: 0.20,     // camera close behind wall
+    portPhi: 0,
+    camR: 2.30,           // portR + portLength
+    camZ: 0.04,
+    camPhi: 0,
+    lookR: 1.10,
+    lookZ: -0.02,
+    lookPhi: 0.28,        // turned right
+    fov: 80,              // wide-angle ~18mm — fits wall vertically
+    tileColor: [36, 34, 30],       // tungsten tiles
+    tileGridSpacing: { poloidal: 0.08, toroidal: 0.07 },
+    tileGridDarken: 0.28,
+    phiMin: -Math.PI,
+    phiMax: Math.PI,
+    plasmaPhiMin: -1.40,
+    plasmaPhiMax: 1.40,
+    nWallSlices: 100,
+    nPlasmaSlices: 80,
+  },
+  jet: {
+    portR: 3.80,
+    portZ: 0,
+    portRadius: 0.50,     // tan(40°)*0.30*1.4 — rim outside 80° FOV
+    portLength: 0.30,     // camera close behind wall
+    portPhi: 0,
+    camR: 4.10,           // portR + portLength
+    camZ: 0.06,
+    camPhi: 0,
+    lookR: 2.00,
+    lookZ: -0.03,
+    lookPhi: 0.25,        // turned right
+    fov: 80,              // wide-angle ~18mm — fits wall vertically
+    tileColor: [32, 30, 28],       // carbon/Be wall
+    tileGridSpacing: { poloidal: 0.12, toroidal: 0.10 },
+    tileGridDarken: 0.26,
+    phiMin: -Math.PI,
+    phiMax: Math.PI,
+    plasmaPhiMin: -1.40,
+    plasmaPhiMax: 1.40,
+    nWallSlices: 100,
+    nPlasmaSlices: 80,
+  },
+}
+
+function getPortConfig(deviceId?: string, r0?: number, a?: number): PortConfig {
+  if (deviceId && PORT_CONFIGS[deviceId]) return PORT_CONFIGS[deviceId]
+  return defaultPortConfig(r0 ?? 1.7, a ?? 0.6)
 }
 
 // ── Per-machine opacity tuning ───────────────────────────────────────────
@@ -32,20 +194,7 @@ const DEFAULT_POWER_SCALE = 0.5
 // The glow ramps smoothly over this duration rather than snapping on/off.
 const STRIKE_FADE_RATE = 0.5   // seconds to go 0→1 (or 1→0)
 
-// ── Camera & projection constants ──────────────────────────────────────────
-
-const CAM_R = 3.8
-const CAM_PHI = 0
-const CAM_Z = 0.15
-const LOOK_R = 1.2
-const LOOK_PHI = 0.25
-const LOOK_Z = -0.05
-const FOV = 55
-
-// Toroidal sweep range
-const PHI_MIN = -0.65
-const PHI_MAX = 0.75
-const N_SLICES = 50
+// Camera & projection constants removed — now in PortConfig per device
 
 // Surface rendering tuning — multi-shell radial emission profile
 // Physically, visible-light emission peaks near the separatrix where
@@ -55,21 +204,20 @@ const SURFACE_BASE_ALPHA = 0.005
 const SURFACE_ELM_ALPHA  = 0.010
 const SURFACE_BLUR_PX = 2.5
 
-// Radial emission shells: each shell is a concentric contour at a given
-// scale factor from the centroid.  The alpha weight follows a peaked
-// profile centred on the separatrix (scale = 1.0).
-//   - Inner shells (scale < 0.8):  nearly invisible → transparent core
-//   - Mid shells  (0.8 – 0.93):   very gentle ramp → faint pedestal hint
-//   - Edge shells (0.95 – 1.03):  steep rise to bright peak → luminous separatrix
-//   - SOL shells  (> 1.03):       fast drop-off → thin scrape-off layer
-const EMISSION_SHELLS: { scale: number; weight: number }[] = [
-  { scale: 0.65, weight: 0.01 },   // deep core — nearly invisible
-  { scale: 0.82, weight: 0.03 },   // mid core — very faint
-  { scale: 0.92, weight: 0.10 },   // inner pedestal — gentle hint
-  { scale: 0.97, weight: 0.50 },   // outer pedestal — rising fast
-  { scale: 1.00, weight: 1.00 },   // separatrix peak
-  { scale: 1.02, weight: 0.50 },   // near SOL — still bright
-  { scale: 1.05, weight: 0.10 },   // far SOL — fading fast
+// Radial emission shells: each shell is a thin ANNULAR RING between an
+// inner and outer scale factor from the centroid.  Using rings (not filled
+// discs) keeps the core visually empty — only the edge radiates.
+//   - Deep pedestal (0.82–0.90): barely visible → transparent core preserved
+//   - Pedestal shoulder (0.90–0.97): gentle ramp upward
+//   - Separatrix peak (0.97–1.005): thin bright ring — the main emission
+//   - Near SOL (1.005–1.02): still bright, but tight
+//   - Far SOL (1.02–1.04): fast drop-off
+const EMISSION_SHELLS: { innerScale: number; outerScale: number; weight: number }[] = [
+  { innerScale: 0.82, outerScale: 0.90, weight: 0.03 },   // deep pedestal — faintest hint
+  { innerScale: 0.90, outerScale: 0.97, weight: 0.20 },   // pedestal shoulder
+  { innerScale: 0.97, outerScale: 1.005, weight: 1.00 },  // separatrix peak (thin!)
+  { innerScale: 1.005, outerScale: 1.02, weight: 0.40 },  // near SOL
+  { innerScale: 1.02, outerScale: 1.04, weight: 0.06 },   // far SOL
 ]
 
 // ── Limb-brightened separatrix glow ─────────────────────────────────────
@@ -88,7 +236,7 @@ const LIMB_BASE_ALPHA = 0.018  // overall brightness of the limb glow (up from 0
 const LIMB_N_SECTORS = 6     // split LCFS into N angular sectors for perf
 
 // Divertor leg rendering: half-width of the ribbon (in meters, R-Z space)
-const LEG_HALF_WIDTH = 0.04
+const LEG_HALF_WIDTH = 0.025
 // Number of waypoints along each divertor leg
 const LEG_NPTS = 6
 
@@ -115,16 +263,16 @@ function normalize(v: Vec3): Vec3 {
   return { x: v.x / len, y: v.y / len, z: v.z / len }
 }
 
-function buildCamera(W: number, H: number) {
+function buildCamera(W: number, H: number, cfg: PortConfig) {
   const camPos: Vec3 = {
-    x: CAM_R * Math.cos(CAM_PHI),
-    y: CAM_R * Math.sin(CAM_PHI),
-    z: CAM_Z,
+    x: cfg.camR * Math.cos(cfg.camPhi),
+    y: cfg.camR * Math.sin(cfg.camPhi),
+    z: cfg.camZ,
   }
   const lookAt: Vec3 = {
-    x: LOOK_R * Math.cos(LOOK_PHI),
-    y: LOOK_R * Math.sin(LOOK_PHI),
-    z: LOOK_Z,
+    x: cfg.lookR * Math.cos(cfg.lookPhi),
+    y: cfg.lookR * Math.sin(cfg.lookPhi),
+    z: cfg.lookZ,
   }
 
   const forward = normalize(sub(lookAt, camPos))
@@ -132,7 +280,7 @@ function buildCamera(W: number, H: number) {
   const right = normalize(cross(forward, worldUp))
   const up = cross(right, forward)
 
-  const focal = (Math.min(W, H) * 0.5) / Math.tan((FOV * Math.PI) / 360)
+  const focal = (Math.min(W, H) * 0.5) / Math.tan((cfg.fov * Math.PI) / 360)
   const cx = W * 0.5
   const cy = H * 0.5
 
@@ -260,13 +408,23 @@ function buildLegRibbon(leg: [number, number][], halfW: number): [number, number
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
+export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, deviceR0, deviceA }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null)
-  const wallCacheRef = useRef<{ canvas: HTMLCanvasElement; w: number; h: number; key: string } | null>(null)
+  const wallCacheRef = useRef<{
+    farCanvas: HTMLCanvasElement   // inboard wall — drawn BEHIND plasma
+    nearCanvas: HTMLCanvasElement  // outboard wall + port — drawn IN FRONT of plasma
+    w: number; h: number; key: string
+  } | null>(null)
   const strikeGlowRef = useRef(0)       // current fade level 0–1
   const prevTimeRef = useRef<number>(0)  // previous snapshot time for dt calc
+
+  // Resolve wall points: prefer limiterPoints, fall back to parsed wallJson
+  const resolvedWall = limiterPoints ?? (() => {
+    if (!wallJson) return undefined
+    try { return JSON.parse(wallJson) as [number, number][] } catch { return undefined }
+  })()
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -302,33 +460,56 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
       offscreen.height = canvas.height
     }
 
-    // Dark background
-    ctx.fillStyle = '#06080d'
+    // Port config for this device
+    const portCfg = getPortConfig(deviceId, deviceR0, deviceA)
+    const [tr, tg, tb] = portCfg.tileColor
+
+    // Background: dark version of tile color — uncovered pixels look like distant wall
+    ctx.fillStyle = `rgb(${Math.round(tr * 0.4)},${Math.round(tg * 0.4)},${Math.round(tb * 0.4)})`
     ctx.fillRect(0, 0, W, H)
 
-    const cam = buildCamera(W, H)
+    const cam = buildCamera(W, H, portCfg)
 
-    // Draw limiter wall (cached — geometry is static so we only redraw on resize)
-    if (limiterPoints && limiterPoints.length > 2) {
-      const wallKey = `${canvas.width}x${canvas.height}x${limiterPoints.length}`
+    // Build/cache limiter wall — split into far (behind plasma) and near (in front).
+    // Far wall is drawn BEFORE plasma, near wall AFTER (correct occlusion).
+    if (resolvedWall && resolvedWall.length > 2) {
+      const wallKey = `${canvas.width}x${canvas.height}x${resolvedWall.length}x${deviceId ?? 'default'}`
       const wc = wallCacheRef.current
       if (!wc || wc.key !== wallKey) {
-        const wallCanvas = wc?.canvas ?? document.createElement('canvas')
-        wallCanvas.width = canvas.width
-        wallCanvas.height = canvas.height
-        const wallCtx = wallCanvas.getContext('2d')
-        if (wallCtx) {
-          wallCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
-          drawLimiterWall(wallCtx, cam, limiterPoints, W, H)
-          wallCacheRef.current = { canvas: wallCanvas, w: canvas.width, h: canvas.height, key: wallKey }
+        // Far canvas: inboard wall (behind plasma)
+        const farCanvas = wc?.farCanvas ?? document.createElement('canvas')
+        farCanvas.width = canvas.width
+        farCanvas.height = canvas.height
+        const farCtx = farCanvas.getContext('2d')
+        if (farCtx) {
+          farCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          drawLimiterWall(farCtx, cam, resolvedWall, W, H, portCfg, 'far')
         }
+
+        // Near canvas: outboard wall + port cylinder (in front of plasma)
+        const nearCanvas = wc?.nearCanvas ?? document.createElement('canvas')
+        nearCanvas.width = canvas.width
+        nearCanvas.height = canvas.height
+        const nearCtx = nearCanvas.getContext('2d')
+        if (nearCtx) {
+          nearCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          drawLimiterWall(nearCtx, cam, resolvedWall, W, H, portCfg, 'near')
+          drawPortCylinder(nearCtx, cam, portCfg)
+        }
+
+        wallCacheRef.current = { farCanvas, nearCanvas, w: canvas.width, h: canvas.height, key: wallKey }
       }
-      if (wallCacheRef.current) {
-        ctx.drawImage(wallCacheRef.current.canvas, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
-      }
+
+      // Draw far wall immediately (behind plasma)
+      ctx.drawImage(wallCacheRef.current.farCanvas, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
     }
 
     if (!snapshot || snapshot.separatrix.points.length < 4) {
+      // Draw both wall layers (no plasma to sandwich between them)
+      if (wallCacheRef.current) {
+        // Far wall already drawn above; draw near wall on top
+        ctx.drawImage(wallCacheRef.current.nearCanvas, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
+      }
       ctx.fillStyle = '#4b556366'
       ctx.font = '11px monospace'
       ctx.textAlign = 'center'
@@ -341,15 +522,16 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
     const disrupted = snapshot.disrupted
 
     // ── Step 1: Build projection grid ──
+    const nSlicesPlasma = portCfg.nPlasmaSlices
     const phis: number[] = []
-    for (let i = 0; i < N_SLICES; i++) {
-      phis.push(PHI_MIN + (PHI_MAX - PHI_MIN) * (i / (N_SLICES - 1)))
+    for (let i = 0; i < nSlicesPlasma; i++) {
+      phis.push(portCfg.plasmaPhiMin + (portCfg.plasmaPhiMax - portCfg.plasmaPhiMin) * (i / (nSlicesPlasma - 1)))
     }
 
     const grid: (ScreenPt | null)[][] = []
     const sliceDepths: number[] = []
 
-    for (let s = 0; s < N_SLICES; s++) {
+    for (let s = 0; s < nSlicesPlasma; s++) {
       const phi = phis[s]
       const row: (ScreenPt | null)[] = []
       let depthSum = 0
@@ -393,18 +575,18 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
 
     const pathFactor: number[] = []
     let pathMin = Infinity
-    for (let s = 0; s < N_SLICES; s++) {
+    for (let s = 0; s < nSlicesPlasma; s++) {
       const phi = phis[s]
-      const dx = rGeo * Math.cos(phi) - CAM_R
+      const dx = rGeo * Math.cos(phi) - portCfg.camR
       const dy = rGeo * Math.sin(phi)
       const dist = Math.sqrt(dx * dx + dy * dy)
-      const faceOn = Math.abs(rGeo - CAM_R * Math.cos(phi))
+      const faceOn = Math.abs(rGeo - portCfg.camR * Math.cos(phi))
       const pf = faceOn > 0.01 ? dist / faceOn : 10.0
       pathFactor.push(pf)
       if (pf < pathMin) pathMin = pf
     }
     // Normalize: face-on slice = 1.0, tangential slices > 1.0
-    for (let s = 0; s < N_SLICES; s++) {
+    for (let s = 0; s < nSlicesPlasma; s++) {
       pathFactor[s] /= pathMin
     }
 
@@ -424,7 +606,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
     const baseAlpha = (elmActive && !disrupted ? SURFACE_ELM_ALPHA : SURFACE_BASE_ALPHA) * opacityScale
 
     // Sort slices by depth: back-to-front (painter's algorithm)
-    const sliceOrder = Array.from({ length: N_SLICES }, (_, i) => i)
+    const sliceOrder = Array.from({ length: nSlicesPlasma }, (_, i) => i)
     sliceOrder.sort((a, b) => sliceDepths[b] - sliceDepths[a])
 
     oCtx.globalCompositeOperation = 'source-over'
@@ -452,25 +634,52 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
       const centX = cxSum / visCount
       const centY = cySum / visCount
 
-      // Draw concentric emission shells — peaked at the separatrix
+      // Draw concentric emission RINGS (annuli) peaked at the separatrix.
+      // Each ring is the area between innerScale and outerScale contours,
+      // rendered with evenodd fill so the interior stays transparent.
+      // For SOL shells (outerScale > 1), clamp the inboard side.
       for (const shell of EMISSION_SHELLS) {
         const shellAlpha = sliceAlpha * shell.weight
         if (shellAlpha < 0.0003) continue
 
         oCtx.beginPath()
+
+        // Outer contour (clockwise)
         let started = false
         for (let j = 0; j < lcfs.length; j++) {
           const p = slicePts[j]
           if (!p) continue
-          // Scale point relative to centroid
-          const sx = centX + (p.sx - centX) * shell.scale
-          const sy = centY + (p.sy - centY) * shell.scale
+          let sx = centX + (p.sx - centX) * shell.outerScale
+          let sy = centY + (p.sy - centY) * shell.outerScale
+
+          // For SOL shells expanding outward, clamp the inboard side
+          if (shell.outerScale > 1.0 && sx < centX) {
+            const excess = shell.outerScale - 1.0
+            const clampScale = 1.0 + excess * 0.3
+            sx = centX + (p.sx - centX) * clampScale
+            sy = centY + (p.sy - centY) * clampScale
+          }
+
           if (!started) { oCtx.moveTo(sx, sy); started = true }
           else oCtx.lineTo(sx, sy)
         }
         oCtx.closePath()
+
+        // Inner contour (counter-clockwise — traced in reverse)
+        started = false
+        for (let j = lcfs.length - 1; j >= 0; j--) {
+          const p = slicePts[j]
+          if (!p) continue
+          let sx = centX + (p.sx - centX) * shell.innerScale
+          let sy = centY + (p.sy - centY) * shell.innerScale
+
+          if (!started) { oCtx.moveTo(sx, sy); started = true }
+          else oCtx.lineTo(sx, sy)
+        }
+        oCtx.closePath()
+
         oCtx.fillStyle = `rgba(${sr},${sg},${sb},${shellAlpha.toFixed(4)})`
-        oCtx.fill()
+        oCtx.fill('evenodd')
       }
     }
 
@@ -585,26 +794,26 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
     // A moderate blur gives a soft glow; the sharp pass adds plasma definition.
     ctx.save()
     ctx.filter = `blur(${SURFACE_BLUR_PX}px)`
-    ctx.globalAlpha = 0.9
-    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
-    ctx.restore()
-
-    // Second, sharper pass for plasma core definition
-    ctx.save()
     ctx.globalAlpha = 0.7
     ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
     ctx.restore()
 
-    // ── Step 4: Strike point glow on divertor plates ──
-    // Drawn on the main canvas AFTER compositing so warm glow isn't
-    // swamped by the cyan plasma emission on the offscreen buffer.
-    // Where the divertor legs contact the limiter, intense heat creates
-    // visible glowing hotspots.  Brightness scales with device power.
-    //
-    // Fade logic: the glow ramps in/out over STRIKE_FADE_RATE seconds,
-    // driven by in_hmode.  This avoids abrupt on/off and prevents
-    // floating glow rings during ramp-up / ramp-down when the strike
-    // points haven't yet settled on the divertor plates.
+    // Second, sharper pass for plasma edge definition
+    ctx.save()
+    ctx.globalAlpha = 0.5
+    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
+    ctx.restore()
+
+    // ── Step 3a: Draw NEAR wall on top of plasma ──
+    // Only the outboard wall (between camera and plasma) occludes.
+    // The far/inboard wall was already drawn before the plasma.
+    if (wallCacheRef.current) {
+      ctx.drawImage(wallCacheRef.current.nearCanvas, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
+    }
+
+    // ── Step 3b: Wall illumination from strike points ──
+    // When strike points are active, nearby wall tiles glow with warm orange
+    // light — visible mostly on the divertor region.
     const wantStrikeGlow = snapshot.in_hmode && !disrupted
     const dt = Math.abs(snapshot.time - prevTimeRef.current)
     prevTimeRef.current = snapshot.time
@@ -615,6 +824,49 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
       strikeGlowRef.current = Math.max(strikeGlowRef.current - fadeStep, 0)
     }
     const strikeFade = strikeGlowRef.current
+
+    // Wall illumination: smooth toroidal glow band at each strike point.
+    // Instead of sampling discrete wall points (which creates visible hot spots),
+    // sweep the strike-point positions toroidally and draw accumulated glow.
+    // The toroidal accumulation naturally creates a continuous bright band
+    // matching what a camera would see from line-integrated emission.
+    if (strikePointRZ.length > 0 && strikeFade > 0.001) {
+      const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
+      const illumAlpha = 0.06 * powerScale * strikeFade
+
+      if (illumAlpha > 0.001) {
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        // Sweep strike points toroidally — use the same phi slices as plasma
+        // so the glow accumulates along sight lines just like the plasma does.
+        for (const [spR, spZ] of strikePointRZ) {
+          for (const s of sliceOrder) {
+            const phi = phis[s]
+            const p3d = toroidal(spR, spZ, phi)
+            const p2d = cam.project(p3d)
+            if (!p2d) continue
+
+            const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
+            // No pathFactor — wall plate radiation is Lambertian (uniform),
+            // not line-integrated like plasma emission.
+            const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6)
+            if (gAlpha < 0.001) continue
+
+            // Larger, softer glow — blends into a continuous band
+            const glowR = 10 + depthFrac * 14
+            const grad = ctx.createRadialGradient(p2d.sx, p2d.sy, 0, p2d.sx, p2d.sy, glowR)
+            grad.addColorStop(0, `rgba(255,180,100,${(gAlpha * 0.8).toFixed(4)})`)
+            grad.addColorStop(0.35, `rgba(200,100,40,${(gAlpha * 0.3).toFixed(4)})`)
+            grad.addColorStop(1, 'rgba(120,50,15,0)')
+            ctx.fillStyle = grad
+            ctx.fillRect(p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
+          }
+        }
+        ctx.restore()
+      }
+    }
+
+    // ── Step 4: Strike point glow on divertor plates ──
     if (strikePointRZ.length > 0 && strikeFade > 0.001) {
       const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
       const strikeAlpha = 0.12 * powerScale * opacityScale * strikeFade
@@ -629,7 +881,9 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
           if (!p2d) continue
 
           const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-          const gAlpha = strikeAlpha * (0.5 + depthFrac * 0.5) * pathFactor[s]
+          // No pathFactor — plate radiation is Lambertian (uniform ring),
+          // not line-integrated like plasma emission.
+          const gAlpha = strikeAlpha * (0.5 + depthFrac * 0.5)
           if (gAlpha < 0.001) continue
 
           const glowR = 12 + depthFrac * 18
@@ -669,7 +923,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
       ctx.fillRect(0, 0, W, H)
       ctx.restore()
     }
-  }, [snapshot, limiterPoints, deviceId])
+  }, [snapshot, limiterPoints, deviceId, resolvedWall, wallJson, deviceR0, deviceA])
 
   useEffect(() => { draw() }, [draw])
 
@@ -696,11 +950,14 @@ export default function PortView({ snapshot, limiterPoints, deviceId }: Props) {
 // drawXpointGlow removed — divertor legs now use smooth toroidal ribbon rendering
 
 /**
- * Draw the limiter wall as a smooth toroidally-swept surface.
- * Uses individual quad faces with backface culling and depth sorting
- * to create the appearance of a hollow torus interior.
- * The full closed contour is swept — backface culling naturally hides
- * the outboard-facing exterior, creating the "looking through the port" effect.
+ * Draw the limiter wall as a smooth toroidally-swept surface viewed from
+ * inside a diagnostic port.  Uses tile colors from PortConfig with a visible
+ * tile grid pattern.  Backface culling hides exterior-facing quads.
+ *
+ * depthFilter controls which quads are drawn:
+ *   'all'  — draw everything (used when no plasma)
+ *   'far'  — only quads farther than the magnetic axis (behind plasma)
+ *   'near' — only quads closer than the magnetic axis (in front of plasma)
  */
 function drawLimiterWall(
   ctx: CanvasRenderingContext2D,
@@ -708,21 +965,47 @@ function drawLimiterWall(
   limiter: [number, number][],
   _W: number,
   _H: number,
+  cfg: PortConfig,
+  depthFilter: 'all' | 'near' | 'far' = 'all',
 ) {
   // Densify contour — interpolate large gaps (inboard wall segments)
-  // and treat the contour as a closed loop
   const pts = densifyContour(limiter, 0.08)
   const nPts = pts.length
   if (nPts < 3) return
 
-  const nSlices = 32 // wall doesn't need as many slices as plasma
+  const nSlices = cfg.nWallSlices
   const phis: number[] = []
   for (let i = 0; i < nSlices; i++) {
-    phis.push(PHI_MIN + (PHI_MAX - PHI_MIN) * (i / (nSlices - 1)))
+    phis.push(cfg.phiMin + (cfg.phiMax - cfg.phiMin) * (i / (nSlices - 1)))
   }
 
-  // Approximate plasma axis R for backface culling
-  const AXIS_R = 1.7
+  // Compute approximate axis R from limiter geometry for backface culling
+  let rMin = Infinity, rMax = -Infinity
+  for (const [R] of pts) {
+    if (R < rMin) rMin = R
+    if (R > rMax) rMax = R
+  }
+  const axisR = (rMin + rMax) * 0.5
+
+  // Compute depth threshold at magnetic axis for near/far splitting.
+  // Quads closer than this are "near" (outboard wall, between camera and plasma).
+  // Quads farther than this are "far" (inboard wall, behind plasma).
+  let axisDepth = Infinity
+  if (depthFilter !== 'all') {
+    const axisPt3d = toroidal(axisR, 0, cfg.portPhi)
+    const axisProj = cam.project(axisPt3d)
+    axisDepth = axisProj ? axisProj.depth : Infinity
+  }
+
+  // Tile grid: compute cumulative poloidal arc length for grid pattern
+  const poloidalArc: number[] = [0]
+  for (let j = 1; j < nPts; j++) {
+    const dR = pts[j][0] - pts[j - 1][0]
+    const dZ = pts[j][1] - pts[j - 1][1]
+    poloidalArc.push(poloidalArc[j - 1] + Math.sqrt(dR * dR + dZ * dZ))
+  }
+
+  const [tr, tg, tb] = cfg.tileColor
 
   // Build 3D grid: grid3D[slice][pointIdx] = Vec3
   const grid3D: Vec3[][] = []
@@ -735,7 +1018,7 @@ function drawLimiterWall(
     grid3D.push(row)
   }
 
-  // Build screen projection grid: gridScr[slice][pointIdx] = ScreenPt | null
+  // Build screen projection grid
   const gridScr: (ScreenPt | null)[][] = []
   for (let s = 0; s < nSlices; s++) {
     const row: (ScreenPt | null)[] = []
@@ -747,51 +1030,66 @@ function drawLimiterWall(
   }
 
   // Build individual quad faces with backface culling
-  const quadDepths: number[] = []
-  const quadCorners: (ScreenPt | null)[][] = []
+  interface WallQuad {
+    corners: (ScreenPt | null)[]
+    depth: number
+    isGridEdge: boolean  // tile boundary
+  }
+  const quads: WallQuad[] = []
 
   for (let s = 0; s < nSlices - 1; s++) {
     const phiMid = (phis[s] + phis[s + 1]) * 0.5
-    const axisPt = toroidal(AXIS_R, 0, phiMid)
+    const axisPt = toroidal(axisR, 0, phiMid)
+
+    // Toroidal grid: check if this phi boundary crosses a tile edge
+    const toroidalArc0 = phis[s] * axisR  // approximate arc length
+    const toroidalArc1 = phis[s + 1] * axisR
+    const tGrid = cfg.tileGridSpacing.toroidal
+    const crossesToroidalGrid = tGrid > 0 &&
+      Math.floor(toroidalArc0 / tGrid) !== Math.floor(toroidalArc1 / tGrid)
 
     for (let j = 0; j < nPts; j++) {
-      const jn = (j + 1) % nPts // closed contour
+      const jn = (j + 1) % nPts
 
-      // 3D corners: [s,j] [s,jn] [s+1,jn] [s+1,j]
       const a = grid3D[s][j]
       const b = grid3D[s][jn]
       const c = grid3D[s + 1][jn]
       const d = grid3D[s + 1][j]
 
-      // Quad center in 3D
       const qcx = (a.x + b.x + c.x + d.x) * 0.25
       const qcy = (a.y + b.y + c.y + d.y) * 0.25
       const qcz = (a.z + b.z + c.z + d.z) * 0.25
 
-      // Backface culling: only show interior-facing surface
-      // "Inward" direction = from limiter surface toward plasma axis
+      // Backface culling
       const inward: Vec3 = {
         x: axisPt.x - qcx,
         y: axisPt.y - qcy,
-        z: -qcz, // axis is at Z=0
+        z: -qcz,
       }
       const viewDir: Vec3 = {
         x: cam.pos.x - qcx,
         y: cam.pos.y - qcy,
         z: cam.pos.z - qcz,
       }
-
-      // If inward direction aligns with view direction, the interior face
-      // is visible to the camera — draw it
       if (dot(inward, viewDir) <= 0) continue
 
-      // Screen projections
+      // Port hole punching — skip quads inside port opening
+      // Compute quad center in cylindrical coords
+      const qR = Math.sqrt(qcx * qcx + qcy * qcy)
+      const qPhi = Math.atan2(qcy, qcx)
+      const dPhi = Math.abs(qPhi - cfg.portPhi)
+      const angularRadius = cfg.portRadius / cfg.portR
+      if (dPhi < angularRadius * 1.2) {
+        const dr = qR - cfg.portR
+        const dz = qcz - cfg.portZ
+        if (dr * dr + dz * dz < cfg.portRadius * cfg.portRadius * 1.1) continue
+      }
+
       const sa = gridScr[s][j]
       const sb = gridScr[s][jn]
       const sc = gridScr[s + 1][jn]
       const sd = gridScr[s + 1][j]
 
-      // Need at least 3 visible corners for a meaningful polygon
       let visCount = 0
       let depthSum = 0
       for (const p of [sa, sb, sc, sd]) {
@@ -799,43 +1097,148 @@ function drawLimiterWall(
       }
       if (visCount < 3) continue
 
-      quadCorners.push([sa, sb, sc, sd])
-      quadDepths.push(depthSum / visCount)
+      const avgDepth = depthSum / visCount
+
+      // Depth filter: skip quads on the wrong side of the magnetic axis
+      if (depthFilter === 'near' && avgDepth > axisDepth) continue
+      if (depthFilter === 'far'  && avgDepth <= axisDepth) continue
+
+      // Poloidal grid: check if this segment crosses a tile boundary
+      const pGrid = cfg.tileGridSpacing.poloidal
+      const crossesPoloidalGrid = pGrid > 0 &&
+        Math.floor(poloidalArc[j] / pGrid) !== Math.floor(poloidalArc[jn < nPts ? jn : 0] / pGrid)
+
+      quads.push({
+        corners: [sa, sb, sc, sd],
+        depth: avgDepth,
+        isGridEdge: crossesToroidalGrid || crossesPoloidalGrid,
+      })
     }
   }
 
-  if (quadCorners.length === 0) return
+  if (quads.length === 0) return
 
-  // Build sort indices (back-to-front)
-  const indices = Array.from({ length: quadCorners.length }, (_, i) => i)
-  indices.sort((a, b) => quadDepths[b] - quadDepths[a])
+  // Sort back-to-front
+  quads.sort((a, b) => b.depth - a.depth)
 
   // Depth range for shading
   let minD = Infinity, maxD = -Infinity
-  for (const d of quadDepths) {
-    if (d < minD) minD = d
-    if (d > maxD) maxD = d
+  for (const q of quads) {
+    if (q.depth < minD) minD = q.depth
+    if (q.depth > maxD) maxD = q.depth
   }
   const dRange = maxD - minD + 0.01
 
-  // Draw all quads back-to-front
+  // Draw all quads
   ctx.save()
-  for (const qi of indices) {
-    const df = 1 - (quadDepths[qi] - minD) / dRange // 0=far, 1=near
-    const brightness = Math.round(14 + df * 34)
-    const alpha = 0.75 + df * 0.20
+  for (const q of quads) {
+    const df = 1 - (q.depth - minD) / dRange // 0=far, 1=near
+    // Tile color: device-specific base modulated by depth and grid pattern
+    const depthMod = 0.45 + df * 0.55
+    const gridDim = q.isGridEdge ? (1 - cfg.tileGridDarken) : 1.0
+    const r = Math.round(tr * depthMod * gridDim)
+    const g = Math.round(tg * depthMod * gridDim)
+    const b = Math.round(tb * depthMod * gridDim)
+    const alpha = 0.80 + df * 0.18
 
-    const corners = quadCorners[qi]
     ctx.beginPath()
     let started = false
-    for (const p of corners) {
+    for (const p of q.corners) {
       if (!p) continue
       if (!started) { ctx.moveTo(p.sx, p.sy); started = true }
       else ctx.lineTo(p.sx, p.sy)
     }
     ctx.closePath()
-    ctx.fillStyle = `rgba(${brightness},${brightness + 2},${brightness + 6},${alpha.toFixed(2)})`
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(2)})`
     ctx.fill()
   }
   ctx.restore()
+}
+
+/**
+ * Draw the cylindrical diagnostic port tube from the vessel wall to the camera.
+ * Camera sits inside the tube — only inward-facing quads are visible.
+ */
+function drawPortCylinder(
+  ctx: CanvasRenderingContext2D,
+  cam: ReturnType<typeof buildCamera>,
+  cfg: PortConfig,
+) {
+  const nRings = 8
+  const nSegs = 24
+  const [tr, tg, tb] = cfg.tileColor
+
+  for (let ri = 0; ri < nRings - 1; ri++) {
+    const t0 = ri / (nRings - 1)
+    const t1 = (ri + 1) / (nRings - 1)
+    const r0 = cfg.portR + t0 * cfg.portLength
+    const r1 = cfg.portR + t1 * cfg.portLength
+
+    for (let si = 0; si < nSegs; si++) {
+      const a0 = (si / nSegs) * Math.PI * 2
+      const a1 = ((si + 1) / nSegs) * Math.PI * 2
+
+      // Port cylinder coords: local (y,z) circle at each R, centred at (portPhi, portZ)
+      const dy0 = cfg.portRadius * Math.cos(a0)
+      const dz0 = cfg.portRadius * Math.sin(a0)
+      const dy1 = cfg.portRadius * Math.cos(a1)
+      const dz1 = cfg.portRadius * Math.sin(a1)
+
+      // Convert to tokamak coords: phi offset = dy/R, Z offset = dz
+      const corners3D: Vec3[] = [
+        toroidal(r0, cfg.portZ + dz0, cfg.portPhi + dy0 / r0),
+        toroidal(r0, cfg.portZ + dz1, cfg.portPhi + dy1 / r0),
+        toroidal(r1, cfg.portZ + dz1, cfg.portPhi + dy1 / r1),
+        toroidal(r1, cfg.portZ + dz0, cfg.portPhi + dy0 / r1),
+      ]
+
+      // Backface cull: only draw interior-facing quads
+      const qcx = (corners3D[0].x + corners3D[2].x) * 0.5
+      const qcy = (corners3D[0].y + corners3D[2].y) * 0.5
+      const qcz = (corners3D[0].z + corners3D[2].z) * 0.5
+
+      // Inward normal for cylinder: toward the axis of the cylinder
+      const cylAxisX = cfg.portR * Math.cos(cfg.portPhi) + cfg.portLength * 0.5 * Math.cos(cfg.portPhi)
+      const cylAxisY = cfg.portR * Math.sin(cfg.portPhi) + cfg.portLength * 0.5 * Math.sin(cfg.portPhi)
+      const inward: Vec3 = {
+        x: cylAxisX - qcx,
+        y: cylAxisY - qcy,
+        z: cfg.portZ - qcz,
+      }
+      const viewDir: Vec3 = {
+        x: cam.pos.x - qcx,
+        y: cam.pos.y - qcy,
+        z: cam.pos.z - qcz,
+      }
+      if (dot(inward, viewDir) <= 0) continue
+
+      // Project corners
+      const scrPts: (ScreenPt | null)[] = corners3D.map(p => {
+        const p2d = cam.project(p)
+        return p2d ? { sx: p2d.sx, sy: p2d.sy, depth: p2d.depth } : null
+      })
+
+      let vis = 0
+      for (const p of scrPts) if (p) vis++
+      if (vis < 3) continue
+
+      // Port cylinder: slightly darker than wall tiles (shadow zone)
+      const depthFrac = t0  // 0 at vessel wall, 1 at camera
+      const shade = 0.35 + depthFrac * 0.45
+      const r = Math.round(tr * shade)
+      const g = Math.round(tg * shade)
+      const b = Math.round(tb * shade)
+
+      ctx.beginPath()
+      let started = false
+      for (const p of scrPts) {
+        if (!p) continue
+        if (!started) { ctx.moveTo(p.sx, p.sy); started = true }
+        else ctx.lineTo(p.sx, p.sy)
+      }
+      ctx.closePath()
+      ctx.fillStyle = `rgb(${r},${g},${b})`
+      ctx.fill()
+    }
+  }
 }

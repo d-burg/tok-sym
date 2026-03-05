@@ -235,7 +235,14 @@ export default function ControlRoom() {
 
         {/* Bottom-right: 3D port view */}
         <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-          <PortView snapshot={plasmaSnapshot} limiterPoints={limiterPoints} deviceId={activeDevice} />
+          <PortView
+            snapshot={plasmaSnapshot}
+            limiterPoints={limiterPoints}
+            deviceId={activeDevice}
+            wallJson={wallJson}
+            deviceR0={devices.find(d => d.id === activeDevice)?.r0}
+            deviceA={devices.find(d => d.id === activeDevice)?.a}
+          />
         </div>
       </div>
 
