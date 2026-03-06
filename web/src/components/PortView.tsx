@@ -352,6 +352,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
   const legFadeRef = useRef(0)          // divertor leg fade level 0–1
   const prevTimeRef = useRef<number>(0)  // previous snapshot time for dt calc
   const maxProgIpRef = useRef(0)        // peak |prog_ip| seen this discharge
+  const lastDrawTimeRef = useRef(0)     // throttle port view to ~20fps
 
   // Resolve wall points: prefer limiterPoints, fall back to parsed wallJson
   const resolvedWall = limiterPoints ?? (() => {
@@ -360,6 +361,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
   })()
 
   const draw = useCallback(() => {
+    // Throttle port view to ~20fps — plasma changes slowly, no need for 60fps
+    const now = performance.now()
+    if (now - lastDrawTimeRef.current < 50) return
+    lastDrawTimeRef.current = now
+
     const canvas = canvasRef.current
     const container = containerRef.current
     if (!canvas || !container) return
@@ -463,6 +469,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     if (snapshot.time < prevTimeRef.current - 0.5) {
       maxProgIpRef.current = 0
       legFadeRef.current = 0
+      lastDrawTimeRef.current = 0  // force first frame of new discharge to draw
     }
     prevTimeRef.current = snapshot.time
 
@@ -915,6 +922,46 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       if (outerLeg.length > 0) strikePointRZ.push(outerLeg[outerLeg.length - 1])
     }
 
+    // ── Pre-project strike point positions for glow rendering ──
+    // Both wall illumination and strike glow use the same screen positions.
+    // Pre-projecting once eliminates 560 redundant toroidal()+project() calls.
+    const nStrike = strikePointRZ.length
+    const strikeXY = new Float64Array(nStrike * nSlicesPlasma * 2)
+    for (let sp = 0; sp < nStrike; sp++) {
+      const spR = strikePointRZ[sp][0], spZ = strikePointRZ[sp][1]
+      for (let s = 0; s < nSlicesPlasma; s++) {
+        const off = (sp * nSlicesPlasma + s) * 2
+        tmpV.x = spR * cosPhis[s]; tmpV.y = spR * sinPhis[s]; tmpV.z = spZ
+        const p2d = cam.project(tmpV)
+        if (p2d) { strikeXY[off] = p2d.sx; strikeXY[off + 1] = p2d.sy }
+        else { strikeXY[off] = NaN; strikeXY[off + 1] = NaN }
+      }
+    }
+
+    // ── Pre-render glow sprites for strike point rendering ──
+    // A single 32×32 radial gradient canvas stamped with drawImage()+globalAlpha
+    // replaces 560 createRadialGradient()+addColorStop() calls per frame.
+    const wallGlowSprite = document.createElement('canvas')
+    wallGlowSprite.width = 32; wallGlowSprite.height = 32
+    const wgCtx = wallGlowSprite.getContext('2d')!
+    const wgGrad = wgCtx.createRadialGradient(16, 16, 0, 16, 16, 16)
+    wgGrad.addColorStop(0, 'rgba(255,190,120,1.0)')
+    wgGrad.addColorStop(0.4, 'rgba(220,120,50,0.4)')
+    wgGrad.addColorStop(1, 'rgba(140,60,20,0)')
+    wgCtx.fillStyle = wgGrad
+    wgCtx.fillRect(0, 0, 32, 32)
+
+    const strikeGlowSprite = document.createElement('canvas')
+    strikeGlowSprite.width = 32; strikeGlowSprite.height = 32
+    const sgCtx = strikeGlowSprite.getContext('2d')!
+    const sgGrad = sgCtx.createRadialGradient(16, 16, 0, 16, 16, 16)
+    sgGrad.addColorStop(0, 'rgba(255,220,170,1.0)')      // alpha /2 (was 2.0×)
+    sgGrad.addColorStop(0.3, 'rgba(255,160,90,0.6)')     // alpha /2 (was 1.2×)
+    sgGrad.addColorStop(0.6, 'rgba(230,100,40,0.2)')     // alpha /2 (was 0.4×)
+    sgGrad.addColorStop(1, 'rgba(160,50,15,0)')
+    sgCtx.fillStyle = sgGrad
+    sgCtx.fillRect(0, 0, 32, 32)
+
     // ── Step 3: Composite blurred surface onto main canvas ──
     // With many overlapping polygons, the surface is already quite smooth.
     // A moderate blur gives a soft glow; the sharp pass adds plasma definition.
@@ -960,25 +1007,22 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       if (illumAlpha > 0.001) {
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
-        for (const [spR, spZ] of strikePointRZ) {
+        for (let sp = 0; sp < nStrike; sp++) {
           for (const s of sliceOrder) {
-            const phi = phis[s]
-            const p3d = toroidal(spR, spZ, phi)
-            const p2d = cam.project(p3d)
-            if (!p2d) continue
+            const off = (sp * nSlicesPlasma + s) * 2
+            const sx = strikeXY[off]
+            if (sx !== sx) continue  // NaN = off-screen
+            const sy = strikeXY[off + 1]
 
             const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
             const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6)
             if (gAlpha < 0.001) continue
 
             // Tight glow radius — comparable to divertor leg width on screen
-            const glowR = 5 + depthFrac * 7  // was 10+14 — now half the size
-            const grad = ctx.createRadialGradient(p2d.sx, p2d.sy, 0, p2d.sx, p2d.sy, glowR)
-            grad.addColorStop(0, `rgba(255,190,120,${(gAlpha * 1.0).toFixed(4)})`)
-            grad.addColorStop(0.4, `rgba(220,120,50,${(gAlpha * 0.4).toFixed(4)})`)
-            grad.addColorStop(1, 'rgba(140,60,20,0)')
-            ctx.fillStyle = grad
-            ctx.fillRect(p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
+            const glowR = 5 + depthFrac * 7
+            ctx.globalAlpha = gAlpha
+            ctx.drawImage(wallGlowSprite, 0, 0, 32, 32,
+              sx - glowR, sy - glowR, glowR * 2, glowR * 2)
           }
         }
         ctx.restore()
@@ -994,29 +1038,23 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
-      for (const [spR, spZ] of strikePointRZ) {
+      for (let sp = 0; sp < nStrike; sp++) {
         for (const s of sliceOrder) {
-          const phi = phis[s]
-          const p3d = toroidal(spR, spZ, phi)
-          const p2d = cam.project(p3d)
-          if (!p2d) continue
+          const off = (sp * nSlicesPlasma + s) * 2
+          const sx = strikeXY[off]
+          if (sx !== sx) continue  // NaN = off-screen
+          const sy = strikeXY[off + 1]
 
           const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
           const gAlpha = strikeAlpha * (0.85 + depthFrac * 0.15)
           if (gAlpha < 0.001) continue
 
           // Tight glow — matches divertor leg width on screen
-          const glowR = 6 + depthFrac * 8  // was 12+18 — now half the size
-          const grad = ctx.createRadialGradient(
-            p2d.sx, p2d.sy, 0,
-            p2d.sx, p2d.sy, glowR,
-          )
-          grad.addColorStop(0, `rgba(255,220,170,${(gAlpha * 2.0).toFixed(4)})`)
-          grad.addColorStop(0.3, `rgba(255,160,90,${(gAlpha * 1.2).toFixed(4)})`)
-          grad.addColorStop(0.6, `rgba(230,100,40,${(gAlpha * 0.4).toFixed(4)})`)
-          grad.addColorStop(1, 'rgba(160,50,15,0)')
-          ctx.fillStyle = grad
-          ctx.fillRect(p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
+          const glowR = 6 + depthFrac * 8
+          // Sprite was rendered with alphas normalized by /2.0, so multiply back
+          ctx.globalAlpha = gAlpha * 2.0
+          ctx.drawImage(strikeGlowSprite, 0, 0, 32, 32,
+            sx - glowR, sy - glowR, glowR * 2, glowR * 2)
         }
       }
       ctx.restore()
