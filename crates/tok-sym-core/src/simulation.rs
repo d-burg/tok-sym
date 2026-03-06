@@ -687,9 +687,11 @@ impl Simulation {
             let mut levels: Vec<f64> = (1..=self.n_flux_surfaces)
                 .map(|i| i as f64 / (self.n_flux_surfaces + 1) as f64)
                 .collect();
-            // Add a near-separatrix contour at ψ_N=0.995 for edge emission
-            // rendering in the 3D port view.  This closed contour sits just
-            // inside the separatrix with no divertor-leg topology.
+            // Add a near-edge surface at ψ_N=0.995 for emission shell rendering.
+            // The actual separatrix (ψ=0) has figure-eight topology at the X-point
+            // which makes it unsuitable for closed-loop emission shells, but this
+            // surface is close enough to be visually identical while staying a
+            // simple closed curve inside the plasma.
             levels.push(0.995);
             contour::extract_contours(
                 &grid, self.eq_nr, self.eq_nz,

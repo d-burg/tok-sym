@@ -235,11 +235,6 @@ const LIMB_EXPONENT = 1.4   // controls inboard/outboard contrast
 const LIMB_BASE_ALPHA = 0.018  // overall brightness of the limb glow (up from 0.015)
 const LIMB_N_SECTORS = 6     // split LCFS into N angular sectors for perf
 
-// Divertor leg rendering: half-width of the ribbon (in meters, R-Z space)
-const LEG_HALF_WIDTH = 0.025
-// Number of waypoints along each divertor leg
-const LEG_NPTS = 6
-
 // ── 3D math helpers ────────────────────────────────────────────────────────
 
 interface Vec3 { x: number; y: number; z: number }
@@ -343,68 +338,6 @@ function densifyContour(pts: [number, number][], maxGap: number): [number, numbe
 // ── Projected point type ───────────────────────────────────────────────────
 
 interface ScreenPt { sx: number; sy: number; depth: number }
-
-// ── Divertor leg geometry ─────────────────────────────────────────────────
-
-/**
- * Build (R, Z) polyline waypoints for inner and outer divertor legs.
- * Each leg curves from the X-point down to approximate strike point locations.
- * Returns [innerLeg, outerLeg] arrays of (R,Z) pairs.
- */
-function buildDivertorLegs(xR: number, xZ: number): [[number, number][], [number, number][]] {
-  const inner: [number, number][] = []
-  const outer: [number, number][] = []
-  for (let i = 0; i < LEG_NPTS; i++) {
-    const t = i / (LEG_NPTS - 1) // 0 = X-point, 1 = strike point
-    // Inner leg: curves inboard and down
-    inner.push([
-      xR - 0.04 * t - 0.12 * t * t,  // R decreases (inboard)
-      xZ - 0.30 * t,                  // Z decreases (downward)
-    ])
-    // Outer leg: curves outboard and down
-    outer.push([
-      xR + 0.04 * t + 0.10 * t * t,  // R increases (outboard)
-      xZ - 0.30 * t,                  // Z decreases (downward)
-    ])
-  }
-  return [inner, outer]
-}
-
-/**
- * Build a thin ribbon polygon from a (R,Z) polyline with given half-width.
- * Returns an array of (R,Z) points forming a closed ribbon (forward along
- * one side, backward along the other).
- */
-function buildLegRibbon(leg: [number, number][], halfW: number): [number, number][] {
-  if (leg.length < 2) return []
-  const left: [number, number][] = []
-  const right: [number, number][] = []
-  for (let i = 0; i < leg.length; i++) {
-    // Compute perpendicular direction from local tangent
-    let dR: number, dZ: number
-    if (i === 0) {
-      dR = leg[1][0] - leg[0][0]
-      dZ = leg[1][1] - leg[0][1]
-    } else if (i === leg.length - 1) {
-      dR = leg[i][0] - leg[i - 1][0]
-      dZ = leg[i][1] - leg[i - 1][1]
-    } else {
-      dR = leg[i + 1][0] - leg[i - 1][0]
-      dZ = leg[i + 1][1] - leg[i - 1][1]
-    }
-    const len = Math.sqrt(dR * dR + dZ * dZ) || 1
-    // Perpendicular: rotate tangent 90°
-    const nR = -dZ / len
-    const nZ = dR / len
-    // Taper: narrower at X-point (i=0), wider at strike point
-    const taper = 0.5 + 0.5 * (i / (leg.length - 1))
-    const w = halfW * taper
-    left.push([leg[i][0] + nR * w, leg[i][1] + nZ * w])
-    right.push([leg[i][0] - nR * w, leg[i][1] - nZ * w])
-  }
-  // Closed ribbon: left forward, right backward
-  return [...left, ...right.reverse()]
-}
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -524,51 +457,38 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     const hasXpoint = xpR > 0 && xpZ < -0.01
 
     // ── Edge contour for emission shells and limb glow ──
-    // For diverted plasmas, the separatrix (and near-separatrix contours
-    // like ψ_N ≈ 0.995) include divertor legs — the contour is NOT a
-    // closed loop.  When canvas closePath() bridges the 1.5+ m gap between
-    // the leg endpoints, it creates a bright artifact line across the
-    // entire plasma.
+    // The actual separatrix (ψ=0) has figure-eight topology at the X-point,
+    // making it unsuitable for closed-loop emission shells.  Instead, we use
+    // the ψ_N=0.995 flux surface (last entry in flux_surfaces) which is
+    // visually identical to the separatrix but guaranteed to be a simple
+    // closed curve inside the plasma.  The actual separatrix is used only
+    // for divertor leg rendering (below the X-point).
     //
-    // FIX: Filter out points below the x-point to get just the MAIN PLASMA
-    // BODY — a naturally closed loop.  This matches the gold separatrix
-    // visible in the equilibrium panel above the x-point.  The divertor
-    // legs are rendered separately (below) from the full separatrix data.
-    //
-    // For limited plasmas (no x-point), use the full separatrix as-is.
-    const nFlux = snapshot.flux_surfaces?.length ?? 0
-    const lcfsContour = (hasXpoint && nFlux > 0)
-      ? snapshot.flux_surfaces[nFlux - 1]  // ψ_N ≈ 0.995 — closest to separatrix
-      : snapshot.separatrix
+    // For the ψ_N=0.995 surface, marching squares may produce unordered
+    // points; we sort by poloidal angle from the centroid to reconstruct
+    // a closed loop (works because the surface is star-shaped from its center).
+    const nFlux = snapshot.flux_surfaces.length
+    const edgeSurface: [number, number][] = nFlux > 0
+      ? snapshot.flux_surfaces[nFlux - 1].points // ψ_N ≈ 0.995
+      : snapshot.separatrix.points
 
-    // Filter: keep only the main plasma body (above x-point).
-    // The margin above xpZ avoids x-point vicinity points where the
-    // contour narrows, and ensures only the D-shaped main body remains.
-    //
-    // After filtering, the remaining points are NOT in closed-loop order
-    // (marching squares traces through the x-point, so removing leg
-    // points creates a discontinuity in the sequence).  We sort by
-    // poloidal angle around the centroid to reconstruct a proper closed
-    // contour — this works because the main plasma body is star-shaped
-    // from its centroid.
+    // For diverted plasmas, filter out any points that leaked below the X-point
     const lcfsAboveXp: [number, number][] = hasXpoint
-      ? lcfsContour.points.filter(([, Z]) => Z > xpZ + 0.05)
-      : lcfsContour.points
+      ? edgeSurface.filter(([, Z]) => Z > xpZ + 0.05)
+      : edgeSurface
 
-    // Compute centroid then sort by poloidal angle for closed-loop ordering
+    // Sort by poloidal angle from centroid → proper closed-loop ordering
     let crSum = 0, czSum = 0
     for (const [R, Z] of lcfsAboveXp) { crSum += R; czSum += Z }
     const cR = crSum / lcfsAboveXp.length
     const cZ = czSum / lcfsAboveXp.length
     const lcfsSorted = [...lcfsAboveXp].sort((a, b) => {
-      const angA = Math.atan2(a[1] - cZ, a[0] - cR)
-      const angB = Math.atan2(b[1] - cZ, b[0] - cR)
-      return angA - angB
+      return Math.atan2(a[1] - cZ, a[0] - cR) - Math.atan2(b[1] - cZ, b[0] - cR)
     })
     const lcfs = subsample(lcfsSorted, 35)
 
     // Extract below-X-point separatrix points for divertor leg rendering.
-    // Use the FULL (un-subsampled) separatrix for smooth legs.
+    // Use the FULL (un-subsampled) actual separatrix for smooth legs.
     const divertorLegPts: [number, number][] = hasXpoint
       ? snapshot.separatrix.points.filter(([, Z]) => Z <= xpZ + 0.01)
       : []
@@ -723,15 +643,22 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         for (let j = 0; j < lcfs.length; j++) {
           const p = slicePts[j]
           if (!p) continue
-          let sx = centX + (p.sx - centX) * shell.outerScale
-          let sy = centY + (p.sy - centY) * shell.outerScale
+          let outerS = shell.outerScale
 
-          // Inboard clamping: don't let any shell expand outward past the
-          // separatrix on the inboard side — restrict to ≤1.0 scale there
-          if (sx < centX && shell.outerScale > 1.0) {
-            sx = centX + (p.sx - centX) * 1.0
-            sy = centY + (p.sy - centY) * 1.0
+          // Inboard softening: on the inboard side (sx < centX), gradually
+          // reduce any outward expansion to avoid glowing into the gap
+          // between the separatrix and center-stack wall.  Instead of a
+          // hard clamp to 1.0, blend smoothly based on how far inboard
+          // the point is — this avoids the dark band at the midplane.
+          if (outerS > 1.0 && p.sx < centX) {
+            // How far inboard (0 = at centroid, 1 = at leftmost edge)
+            const inboardFrac = Math.min((centX - p.sx) / (centX * 0.5), 1.0)
+            // Blend from full outerScale (at centroid) to 1.0 (at far inboard)
+            outerS = outerS + (1.0 - outerS) * inboardFrac
           }
+
+          const sx = centX + (p.sx - centX) * outerS
+          const sy = centY + (p.sy - centY) * outerS
 
           if (!started) { oCtx.moveTo(sx, sy); started = true }
           else oCtx.lineTo(sx, sy)
@@ -821,7 +748,8 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // ── Step 2b: Draw divertor legs from actual separatrix geometry ──
     // Use the real separatrix points below the X-point (extracted above),
     // split into inner leg (R < x-point R) and outer leg (R > x-point R).
-    // This ensures the 3D legs match the equilibrium cross-section exactly.
+    // Rendered as diffuse stroked centerlines (multiple glow passes) rather
+    // than flat-filled ribbons, so they blend smoothly across toroidal slices.
     let strikePointRZ: [number, number][] = []
     const showLegs = hasXpoint && snapshot.in_hmode && !disrupted && divertorLegPts.length >= 3
     if (showLegs) {
@@ -842,15 +770,18 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       if (innerLeg.length > 0) innerLeg.unshift(xPt)
       if (outerLeg.length > 0) outerLeg.unshift(xPt)
 
-      // Build thin ribbons from the real leg geometry
-      const innerRibbon = innerLeg.length >= 2 ? buildLegRibbon(innerLeg, LEG_HALF_WIDTH) : []
-      const outerRibbon = outerLeg.length >= 2 ? buildLegRibbon(outerLeg, LEG_HALF_WIDTH) : []
-
       // Leg color: slightly brighter/whiter than bulk plasma
       const lr = disrupted ? 220 : 140
       const lg = disrupted ? 110 : 210
       const lb = disrupted ? 70 : 255
-      const legAlphaBase = baseAlpha * 5.0 // legs need high per-slice alpha to accumulate visibility
+      const legAlphaBase = baseAlpha * 4.0
+
+      // Diffuse glow passes — wide soft outer + narrow bright core
+      const legPasses = [
+        { lineWidth: 8.0, alphaScale: 0.15 },  // soft outer halo
+        { lineWidth: 4.0, alphaScale: 0.30 },  // mid glow
+        { lineWidth: 1.5, alphaScale: 0.55 },  // bright core
+      ]
 
       for (const s of sliceOrder) {
         const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
@@ -858,20 +789,29 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         if (legAlpha < 0.0002) continue
         const phi = phis[s]
 
-        for (const ribbon of [innerRibbon, outerRibbon]) {
-          if (ribbon.length < 3) continue
-          oCtx.beginPath()
-          let started = false
-          for (const [R, Z] of ribbon) {
-            const p3d = toroidal(R, Z, phi)
-            const p2d = cam.project(p3d)
-            if (!p2d) continue
-            if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
-            else oCtx.lineTo(p2d.sx, p2d.sy)
+        for (const leg of [innerLeg, outerLeg]) {
+          if (leg.length < 2) continue
+
+          for (const pass of legPasses) {
+            const passAlpha = legAlpha * pass.alphaScale
+            if (passAlpha < 0.0002) continue
+
+            oCtx.beginPath()
+            oCtx.lineWidth = pass.lineWidth
+            oCtx.lineCap = 'round'
+            oCtx.lineJoin = 'round'
+            let started = false
+            for (const [R, Z] of leg) {
+              const p3d = toroidal(R, Z, phi)
+              const p2d = cam.project(p3d)
+              if (!p2d) continue
+              if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
+              else oCtx.lineTo(p2d.sx, p2d.sy)
+            }
+            if (!started) continue
+            oCtx.strokeStyle = `rgba(${lr},${lg},${lb},${passAlpha.toFixed(4)})`
+            oCtx.stroke()
           }
-          oCtx.closePath()
-          oCtx.fillStyle = `rgba(${lr},${lg},${lb},${legAlpha.toFixed(4)})`
-          oCtx.fill()
         }
       }
 
