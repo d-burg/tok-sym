@@ -193,6 +193,7 @@ const DEFAULT_POWER_SCALE = 0.5
 // Strike-point glow fade-in/out time constant (seconds).
 // The glow ramps smoothly over this duration rather than snapping on/off.
 const STRIKE_FADE_RATE = 0.5   // seconds to go 0→1 (or 1→0)
+const LEG_FADE_RATE = 0.4      // seconds for divertor legs to fade in/out
 
 // Camera & projection constants removed — now in PortConfig per device
 
@@ -351,7 +352,9 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     w: number; h: number; key: string
   } | null>(null)
   const strikeGlowRef = useRef(0)       // current fade level 0–1
+  const legFadeRef = useRef(0)          // divertor leg fade level 0–1
   const prevTimeRef = useRef<number>(0)  // previous snapshot time for dt calc
+  const maxProgIpRef = useRef(0)        // peak |prog_ip| seen this discharge
 
   // Resolve wall points: prefer limiterPoints, fall back to parsed wallJson
   const resolvedWall = limiterPoints ?? (() => {
@@ -456,6 +459,39 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     const xpR = snapshot.xpoint_r
     const hasXpoint = xpR > 0 && xpZ < -0.01
 
+    // ── Time delta for fade effects ──
+    // Computed early so fades update even during early returns (betaN < 0.15).
+    const dt = Math.abs(snapshot.time - prevTimeRef.current)
+    // Detect new discharge (time jumped backward) — reset tracking state
+    if (snapshot.time < prevTimeRef.current - 0.5) {
+      maxProgIpRef.current = 0
+      legFadeRef.current = 0
+    }
+    prevTimeRef.current = snapshot.time
+
+    // ── Divertor leg fade ──
+    // Legs appear when the programmed Ip has reached its flat-top value
+    // (progIpFrac ≈ 1.0) and fade out as soon as ramp-down begins
+    // (progIpFrac drops below threshold).  This uses peak-tracking: we
+    // record the maximum |prog_ip| seen this discharge, then compare the
+    // current value to that peak.  During ramp-down prog_ip drops while
+    // both ip and prog_ip decrease together (so ip/prog_ip stays ~1.0),
+    // but progIpFrac correctly detects the descent from flat-top.
+    const progIpAbs = Math.abs(snapshot.prog_ip)
+    if (progIpAbs > maxProgIpRef.current) maxProgIpRef.current = progIpAbs
+    const progIpFrac = maxProgIpRef.current > 0.1
+      ? progIpAbs / maxProgIpRef.current : 0
+    const ipFrac = Math.abs(snapshot.prog_ip) > 0.1
+      ? Math.abs(snapshot.ip) / Math.abs(snapshot.prog_ip) : 0
+    const wantLegs = hasXpoint && progIpFrac > 0.98 && ipFrac > 0.5 && !disrupted
+    const legFadeStep = LEG_FADE_RATE > 0 ? Math.min(dt / LEG_FADE_RATE, 1) : 1
+    if (wantLegs) {
+      legFadeRef.current = Math.min(legFadeRef.current + legFadeStep, 1)
+    } else {
+      legFadeRef.current = Math.max(legFadeRef.current - legFadeStep, 0)
+    }
+    const legFade = legFadeRef.current
+
     // ── Edge contour for emission shells and limb glow ──
     // The actual separatrix (ψ=0) has figure-eight topology at the X-point,
     // making it unsuitable for closed-loop emission shells.  Instead we use
@@ -468,7 +504,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     let edgeSurface: [number, number][] = []
     for (let fi = nFlux - 1; fi >= 0; fi--) {
       const pts = snapshot.flux_surfaces[fi].points
-      const above = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.05) : pts
+      const above = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.02) : pts
       if (above.length >= 20) {
         edgeSurface = above
         break
@@ -477,7 +513,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // Fallback: use separatrix points if no flux surface had enough points
     if (edgeSurface.length < 20) {
       const pts = snapshot.separatrix.points
-      edgeSurface = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.05) : pts
+      edgeSurface = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.02) : pts
     }
 
     // Sort by poloidal angle from centroid → proper closed-loop ordering.
@@ -605,67 +641,65 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     oCtx.globalCompositeOperation = 'source-over'
 
-    // For each slice, compute the screen-space centroid of the LCFS contour
-    // so we can scale outward/inward for edge diffusion rings.
+    // For each toroidal slice, scale emission shell contours in physical (R,Z)
+    // space and project to screen for uniform shell thickness.
     for (const s of sliceOrder) {
       const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange // 0=far, 1=near
-      // Mild depth cue (atmospheric perspective) + toroidal path-length factor.
-      // For optically thin emission, path length dominates over proximity.
-      const sliceAlpha = baseAlpha * (0.7 + depthFrac * 0.3) * pathFactor[s]
+      // Mild depth cue only — no pathFactor here.
+      // The limb glow (Step 2a) handles limb-brightening.  Applying pathFactor
+      // to the emission shells created a dark band at the inboard midplane
+      // because face-on slices (low pathFactor) are ~6× dimmer than tangential
+      // slices, and the inboard midplane is viewed nearly face-on.
+      const sliceAlpha = baseAlpha * (0.7 + depthFrac * 0.3)
 
       const slicePts = grid[s]
+      const phi = phis[s]
 
-      // Compute screen-space centroid of visible points
-      let cxSum = 0, cySum = 0, visCount = 0
+      // Visibility check — skip if fewer than 3 LCFS points project on-screen
+      let visCount = 0
       for (let j = 0; j < lcfs.length; j++) {
-        const p = slicePts[j]
-        if (!p) continue
-        cxSum += p.sx
-        cySum += p.sy
-        visCount++
+        if (slicePts[j]) visCount++
       }
       if (visCount < 3) continue
-      const centX = cxSum / visCount
-      const centY = cySum / visCount
 
       // Draw concentric emission RINGS (annuli) peaked at the separatrix.
       // Each ring is the area between innerScale and outerScale contours,
       // rendered with evenodd fill so the interior stays transparent.
       //
-      // Inboard clamping: on the inboard side (sx < centX), scaling outward
-      // pushes contours into the gap between separatrix and center-stack
-      // wall, creating an erroneous glowing strip.  We aggressively clamp
-      // any outward expansion on the inboard side for all shells.
+      // Shell offsets are computed in physical (R,Z) space from the LCFS
+      // centroid, then projected to screen.  This ensures uniform shell
+      // thickness on both inboard and outboard sides — the old screen-space
+      // scaling produced thin shells on the inboard midplane due to
+      // perspective compression, creating a dark toroidal band artifact.
       for (const shell of EMISSION_SHELLS) {
         const shellAlpha = sliceAlpha * shell.weight
         if (shellAlpha < 0.0003) continue
 
         oCtx.beginPath()
 
-        // Outer contour (clockwise)
+        // Outer contour (clockwise) — scaled in physical (R,Z) space
         let started = false
         for (let j = 0; j < lcfs.length; j++) {
-          const p = slicePts[j]
-          if (!p) continue
-
-          const sx = centX + (p.sx - centX) * shell.outerScale
-          const sy = centY + (p.sy - centY) * shell.outerScale
-
-          if (!started) { oCtx.moveTo(sx, sy); started = true }
-          else oCtx.lineTo(sx, sy)
+          const [R, Z] = lcfs[j]
+          const Ro = cR + (R - cR) * shell.outerScale
+          const Zo = cZ + (Z - cZ) * shell.outerScale
+          const p2d = cam.project(toroidal(Ro, Zo, phi))
+          if (!p2d) continue
+          if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
+          else oCtx.lineTo(p2d.sx, p2d.sy)
         }
         oCtx.closePath()
 
         // Inner contour (counter-clockwise — traced in reverse)
         started = false
         for (let j = lcfs.length - 1; j >= 0; j--) {
-          const p = slicePts[j]
-          if (!p) continue
-          let sx = centX + (p.sx - centX) * shell.innerScale
-          let sy = centY + (p.sy - centY) * shell.innerScale
-
-          if (!started) { oCtx.moveTo(sx, sy); started = true }
-          else oCtx.lineTo(sx, sy)
+          const [R, Z] = lcfs[j]
+          const Ri = cR + (R - cR) * shell.innerScale
+          const Zi = cZ + (Z - cZ) * shell.innerScale
+          const p2d = cam.project(toroidal(Ri, Zi, phi))
+          if (!p2d) continue
+          if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
+          else oCtx.lineTo(p2d.sx, p2d.sy)
         }
         oCtx.closePath()
 
@@ -742,7 +776,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // Rendered as diffuse stroked centerlines (multiple glow passes) rather
     // than flat-filled ribbons, so they blend smoothly across toroidal slices.
     let strikePointRZ: [number, number][] = []
-    const showLegs = hasXpoint && snapshot.in_hmode && !disrupted && divertorLegPts.length >= 3
+    const showLegs = legFade > 0.01 && divertorLegPts.length >= 3
     if (showLegs) {
       // Split below-X-point points into inner and outer legs
       const innerLeg: [number, number][] = []
@@ -765,7 +799,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       const lr = disrupted ? 220 : 140
       const lg = disrupted ? 110 : 210
       const lb = disrupted ? 70 : 255
-      const legAlphaBase = baseAlpha * 4.0
+      const legAlphaBase = baseAlpha * 4.0 * legFade
 
       // Diffuse glow passes — wide soft outer + narrow bright core
       const legPasses = [
@@ -838,8 +872,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // When strike points are active, nearby wall tiles glow with warm orange
     // light — visible mostly on the divertor region.
     const wantStrikeGlow = snapshot.in_hmode && !disrupted
-    const dt = Math.abs(snapshot.time - prevTimeRef.current)
-    prevTimeRef.current = snapshot.time
+    // dt and prevTimeRef already updated above (before early returns)
     const fadeStep = STRIKE_FADE_RATE > 0 ? Math.min(dt / STRIKE_FADE_RATE, 1) : 1
     if (wantStrikeGlow) {
       strikeGlowRef.current = Math.min(strikeGlowRef.current + fadeStep, 1)
