@@ -458,31 +458,35 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     // ── Edge contour for emission shells and limb glow ──
     // The actual separatrix (ψ=0) has figure-eight topology at the X-point,
-    // making it unsuitable for closed-loop emission shells.  Instead, we use
-    // the ψ_N=0.995 flux surface (last entry in flux_surfaces) which is
-    // visually identical to the separatrix but guaranteed to be a simple
-    // closed curve inside the plasma.  The actual separatrix is used only
-    // for divertor leg rendering (below the X-point).
-    //
-    // For the ψ_N=0.995 surface, marching squares may produce unordered
-    // points; we sort by poloidal angle from the centroid to reconstruct
-    // a closed loop (works because the surface is star-shaped from its center).
+    // making it unsuitable for closed-loop emission shells.  Instead we use
+    // the ψ_N≈0.995 flux surface (last entry in flux_surfaces) — visually
+    // identical to the separatrix but guaranteed to be a simple closed curve.
+    // During ramp-up/ramp-down the near-edge surface can be fragmentary, so
+    // we walk inward through flux surfaces until we find one with enough
+    // points to form a proper contour (≥20 points above the X-point).
     const nFlux = snapshot.flux_surfaces.length
-    const edgeSurface: [number, number][] = nFlux > 0
-      ? snapshot.flux_surfaces[nFlux - 1].points // ψ_N ≈ 0.995
-      : snapshot.separatrix.points
+    let edgeSurface: [number, number][] = []
+    for (let fi = nFlux - 1; fi >= 0; fi--) {
+      const pts = snapshot.flux_surfaces[fi].points
+      const above = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.05) : pts
+      if (above.length >= 20) {
+        edgeSurface = above
+        break
+      }
+    }
+    // Fallback: use separatrix points if no flux surface had enough points
+    if (edgeSurface.length < 20) {
+      const pts = snapshot.separatrix.points
+      edgeSurface = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.05) : pts
+    }
 
-    // For diverted plasmas, filter out any points that leaked below the X-point
-    const lcfsAboveXp: [number, number][] = hasXpoint
-      ? edgeSurface.filter(([, Z]) => Z > xpZ + 0.05)
-      : edgeSurface
-
-    // Sort by poloidal angle from centroid → proper closed-loop ordering
+    // Sort by poloidal angle from centroid → proper closed-loop ordering.
+    // Works because any flux surface above the X-point is star-shaped.
     let crSum = 0, czSum = 0
-    for (const [R, Z] of lcfsAboveXp) { crSum += R; czSum += Z }
-    const cR = crSum / lcfsAboveXp.length
-    const cZ = czSum / lcfsAboveXp.length
-    const lcfsSorted = [...lcfsAboveXp].sort((a, b) => {
+    for (const [R, Z] of edgeSurface) { crSum += R; czSum += Z }
+    const cR = crSum / edgeSurface.length
+    const cZ = czSum / edgeSurface.length
+    const lcfsSorted = [...edgeSurface].sort((a, b) => {
       return Math.atan2(a[1] - cZ, a[0] - cR) - Math.atan2(b[1] - cZ, b[0] - cR)
     })
     const lcfs = subsample(lcfsSorted, 35)
@@ -643,22 +647,9 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         for (let j = 0; j < lcfs.length; j++) {
           const p = slicePts[j]
           if (!p) continue
-          let outerS = shell.outerScale
 
-          // Inboard softening: on the inboard side (sx < centX), gradually
-          // reduce any outward expansion to avoid glowing into the gap
-          // between the separatrix and center-stack wall.  Instead of a
-          // hard clamp to 1.0, blend smoothly based on how far inboard
-          // the point is — this avoids the dark band at the midplane.
-          if (outerS > 1.0 && p.sx < centX) {
-            // How far inboard (0 = at centroid, 1 = at leftmost edge)
-            const inboardFrac = Math.min((centX - p.sx) / (centX * 0.5), 1.0)
-            // Blend from full outerScale (at centroid) to 1.0 (at far inboard)
-            outerS = outerS + (1.0 - outerS) * inboardFrac
-          }
-
-          const sx = centX + (p.sx - centX) * outerS
-          const sy = centY + (p.sy - centY) * outerS
+          const sx = centX + (p.sx - centX) * shell.outerScale
+          const sy = centY + (p.sy - centY) * shell.outerScale
 
           if (!started) { oCtx.moveTo(sx, sy); started = true }
           else oCtx.lineTo(sx, sy)

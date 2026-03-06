@@ -172,9 +172,13 @@ fn march_squares(
     chain_segments(segments)
 }
 
-/// Chain disconnected line segments into ordered polylines.
+/// Chain disconnected line segments into ordered polylines, returning
+/// only the **longest chain**.  Marching squares often produces small
+/// spurious chains from numerical noise — discarding them prevents
+/// angle-sorting artifacts in the renderer.
+///
 /// Input: pairs of points forming segments [(p0,p1), (p2,p3), ...].
-/// Output: ordered points forming connected paths.
+/// Output: ordered points of the single longest connected chain.
 fn chain_segments(segments: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     if segments.len() < 2 {
         return segments;
@@ -182,13 +186,15 @@ fn chain_segments(segments: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 
     let n_segs = segments.len() / 2;
     let mut used = vec![false; n_segs];
-    let mut result = Vec::with_capacity(segments.len());
+    let mut best_chain: Vec<(f64, f64)> = Vec::new();
 
     let dist2 = |a: (f64, f64), b: (f64, f64)| -> f64 {
         (a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)
     };
 
-    // Find chains starting from unused segments
+    let tolerance = 1e-10;
+
+    // Find all chains, keep the longest
     for start in 0..n_segs {
         if used[start] {
             continue;
@@ -198,7 +204,6 @@ fn chain_segments(segments: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
         let mut chain = vec![segments[start * 2], segments[start * 2 + 1]];
 
         // Extend forward
-        let tolerance = 1e-10;
         loop {
             let tail = *chain.last().unwrap();
             let mut found = false;
@@ -228,10 +233,12 @@ fn chain_segments(segments: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
             }
         }
 
-        result.extend_from_slice(&chain);
+        if chain.len() > best_chain.len() {
+            best_chain = chain;
+        }
     }
 
-    result
+    best_chain
 }
 
 /// Extract flux surfaces as ordered contour polylines.
