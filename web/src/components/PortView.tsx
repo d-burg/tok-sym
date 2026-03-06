@@ -65,7 +65,7 @@ function defaultPortConfig(r0: number, a: number): PortConfig {
     plasmaPhiMin: -1.40,
     plasmaPhiMax: 1.40,
     nWallSlices: 100,
-    nPlasmaSlices: 80,
+    nPlasmaSlices: 140,
   }
 }
 
@@ -91,7 +91,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     plasmaPhiMin: -1.40,
     plasmaPhiMax: 1.40,
     nWallSlices: 100,
-    nPlasmaSlices: 80,
+    nPlasmaSlices: 140,
   },
   iter: {
     portR: 8.30,
@@ -114,7 +114,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     plasmaPhiMin: -1.40,
     plasmaPhiMax: 1.40,
     nWallSlices: 100,
-    nPlasmaSlices: 80,
+    nPlasmaSlices: 140,
   },
   sparc: {
     portR: 2.10,
@@ -137,7 +137,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     plasmaPhiMin: -1.40,
     plasmaPhiMax: 1.40,
     nWallSlices: 100,
-    nPlasmaSlices: 80,
+    nPlasmaSlices: 140,
   },
   jet: {
     portR: 3.80,
@@ -160,7 +160,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     plasmaPhiMin: -1.40,
     plasmaPhiMax: 1.40,
     nWallSlices: 100,
-    nPlasmaSlices: 80,
+    nPlasmaSlices: 140,
   },
 }
 
@@ -201,23 +201,19 @@ const LEG_FADE_RATE = 0.4      // seconds for divertor legs to fade in/out
 // Physically, visible-light emission peaks near the separatrix where
 // partially-ionized impurities and neutrals radiate (cooler edge).
 // The hot core is essentially transparent at visible wavelengths.
-const SURFACE_BASE_ALPHA = 0.005
-const SURFACE_ELM_ALPHA  = 0.010
-const SURFACE_BLUR_PX = 2.5
+const SURFACE_BASE_ALPHA = 0.003  // reduced from 0.005 to compensate for 140 slices (was 80)
+const SURFACE_ELM_ALPHA  = 0.006  // reduced from 0.010, same ratio
+const SURFACE_BLUR_PX = 3.5       // increased from 2.5 to soften shell edges
 
 // Radial emission shells: each shell is a thin ANNULAR RING between an
 // inner and outer scale factor from the centroid.  Using rings (not filled
 // discs) keeps the core visually empty — only the edge radiates.
-//   - Deep pedestal (0.82–0.90): barely visible → transparent core preserved
-//   - Pedestal shoulder (0.90–0.97): gentle ramp upward
-//   - Separatrix peak (0.97–1.005): thin bright ring — the main emission
-//   - Near SOL (1.005–1.02): still bright, but tight
-//   - Far SOL (1.02–1.04): fast drop-off
+// Shells overlap slightly at boundaries for smooth blending.
 const EMISSION_SHELLS: { innerScale: number; outerScale: number; weight: number }[] = [
   { innerScale: 0.82, outerScale: 0.90, weight: 0.03 },   // deep pedestal — faintest hint
-  { innerScale: 0.90, outerScale: 0.97, weight: 0.20 },   // pedestal shoulder
-  { innerScale: 0.97, outerScale: 1.005, weight: 1.00 },  // separatrix peak (thin!)
-  { innerScale: 1.005, outerScale: 1.02, weight: 0.40 },  // near SOL
+  { innerScale: 0.90, outerScale: 0.96, weight: 0.20 },   // pedestal shoulder (overlaps peak)
+  { innerScale: 0.95, outerScale: 1.01, weight: 1.00 },   // separatrix peak (widened for diffuse look)
+  { innerScale: 1.005, outerScale: 1.025, weight: 0.35 },  // near SOL (widened)
   { innerScale: 1.02, outerScale: 1.04, weight: 0.06 },   // far SOL
 ]
 
@@ -229,12 +225,13 @@ const EMISSION_SHELLS: { innerScale: number; outerScale: number; weight: number 
 // than the outboard side.  We model this as per-segment stroke alpha
 // weighted by (R_geo / R_local)^LIMB_EXPONENT.
 const LIMB_GLOW_PASSES: { lineWidth: number; alphaScale: number }[] = [
-  { lineWidth: 6.0, alphaScale: 0.20 },  // outer halo — wider, slightly brighter
-  { lineWidth: 2.5, alphaScale: 0.55 },  // bright core
+  { lineWidth: 9.0, alphaScale: 0.08 },  // widest, faintest halo
+  { lineWidth: 6.0, alphaScale: 0.15 },  // mid-outer
+  { lineWidth: 3.5, alphaScale: 0.30 },  // mid-inner
+  { lineWidth: 1.5, alphaScale: 0.55 },  // bright core
 ]
 const LIMB_EXPONENT = 1.4   // controls inboard/outboard contrast
-const LIMB_BASE_ALPHA = 0.018  // overall brightness of the limb glow (up from 0.015)
-const LIMB_N_SECTORS = 6     // split LCFS into N angular sectors for perf
+const LIMB_BASE_ALPHA = 0.012  // reduced from 0.018 to compensate for 140 slices
 
 // ── 3D math helpers ────────────────────────────────────────────────────────
 
@@ -623,8 +620,9 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       if (pf < pathMin) pathMin = pf
     }
     // Normalize: face-on slice = 1.0, tangential slices > 1.0
+    // Cap at 4.0 to prevent extreme inter-slice contrast at tangential views
     for (let s = 0; s < nSlicesPlasma; s++) {
-      pathFactor[s] /= pathMin
+      pathFactor[s] = Math.min(pathFactor[s] / pathMin, 4.0)
     }
 
     // ── Step 2: Draw filled surface to offscreen canvas ──
@@ -657,7 +655,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       // to the emission shells created a dark band at the inboard midplane
       // because face-on slices (low pathFactor) are ~6× dimmer than tangential
       // slices, and the inboard midplane is viewed nearly face-on.
-      const sliceAlpha = baseAlpha * (0.7 + depthFrac * 0.3)
+      const sliceAlpha = baseAlpha * (0.85 + depthFrac * 0.15)
 
       const slicePts = grid[s]
       const phi = phis[s]
@@ -716,81 +714,48 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     }
 
     // ── Step 2a: Limb-brightened separatrix glow ──
-    // Draw the LCFS outline as per-sector strokes whose brightness depends on:
-    //  1. Toroidal path factor (dominant) — tangential sight lines through the
-    //     toroidal shell accumulate more emission than face-on views.
-    //  2. Poloidal R-weighting (secondary) — within each slice, inboard
-    //     segments (small R, tighter curvature) have slightly longer paths.
+    // Draw the LCFS outline as a single closed stroke per pass per slice.
+    // Brightness depends on toroidal path factor (tangential views brighter)
+    // and a mild contour-averaged R-weighting (inboard slightly brighter).
+    // Previous sector-based approach (LIMB_N_SECTORS=6) created visible bright
+    // bands at sector boundaries from overlapping strokes with mismatched alpha.
+    // Drawing the entire contour as one path eliminates all boundary artifacts.
     {
       const limbAlpha = LIMB_BASE_ALPHA * opacityScale * plasmaIntensity
         * (elmActive && !disrupted ? 1.8 : 1.0)
 
-      // Pre-compute sector boundaries and mild R-based poloidal weighting
-      const sectorSize = Math.ceil(lcfs.length / LIMB_N_SECTORS)
-      const sectorLimb: number[] = []
-      for (let sec = 0; sec < LIMB_N_SECTORS; sec++) {
-        const j0 = sec * sectorSize
-        const j1 = Math.min((sec + 1) * sectorSize, lcfs.length)
-        let rSum = 0, cnt = 0
-        for (let j = j0; j < j1; j++) {
-          rSum += lcfs[j][0]
-          cnt++
-        }
-        const rAvg = cnt > 0 ? rSum / cnt : rGeo
-        // Mild poloidal factor — sqrt of the full exponent for subtlety
-        sectorLimb.push(Math.pow(rGeo / rAvg, LIMB_EXPONENT * 0.5))
-      }
+      // Single contour-averaged R-weight (replaces per-sector sectorLimb[])
+      let rContourSum = 0
+      for (const [R] of lcfs) rContourSum += R
+      const contourLimb = Math.pow(rGeo / (rContourSum / lcfs.length), LIMB_EXPONENT * 0.5)
 
       for (const s of sliceOrder) {
         const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-        // Toroidal path factor is the primary driver; mild depth cue secondary
-        const sliceLimbAlpha = limbAlpha * (0.7 + depthFrac * 0.3) * pathFactor[s]
+        const sliceLimbAlpha = limbAlpha * (0.85 + depthFrac * 0.15) * pathFactor[s] * contourLimb
 
         const slicePts = grid[s]
 
-        // Draw glow passes per sector (arc segments, each with its own alpha).
-        // The LCFS contour is sorted by poloidal angle; the wrap-around
-        // segment (last point → first point) falls at the inboard midplane.
-        // We draw LIMB_N_SECTORS+1 segments: the +1 connects the last point
-        // back to the first, closing the contour and preventing a dark gap.
         for (const pass of LIMB_GLOW_PASSES) {
+          const passAlpha = sliceLimbAlpha * pass.alphaScale
+          if (passAlpha < 0.0003) continue
+
+          oCtx.beginPath()
           oCtx.lineWidth = pass.lineWidth
           oCtx.lineCap = 'round'
           oCtx.lineJoin = 'round'
 
-          for (let sec = 0; sec <= LIMB_N_SECTORS; sec++) {
-            // The extra segment (sec == LIMB_N_SECTORS) closes the contour:
-            // it strokes from the last sector's end back to the first point.
-            const isWrap = sec === LIMB_N_SECTORS
-            const secIdx = isWrap ? LIMB_N_SECTORS - 1 : sec  // use last sector's alpha
-            const segAlpha = sliceLimbAlpha * pass.alphaScale * sectorLimb[secIdx]
-            if (segAlpha < 0.0003) continue
-
-            if (isWrap) {
-              // Wrap-around: stroke from last point to first point
-              const pLast = slicePts[lcfs.length - 1]
-              const pFirst = slicePts[0]
-              if (!pLast || !pFirst) continue
-              oCtx.beginPath()
-              oCtx.moveTo(pLast.sx, pLast.sy)
-              oCtx.lineTo(pFirst.sx, pFirst.sy)
-            } else {
-              const j0 = sec * sectorSize
-              const j1 = Math.min((sec + 1) * sectorSize + 1, lcfs.length)
-
-              oCtx.beginPath()
-              let started = false
-              for (let j = j0; j < j1; j++) {
-                const p = slicePts[j]
-                if (!p) continue
-                if (!started) { oCtx.moveTo(p.sx, p.sy); started = true }
-                else oCtx.lineTo(p.sx, p.sy)
-              }
-              if (!started) continue
-            }
-            oCtx.strokeStyle = `rgba(${sr},${sg},${sb},${segAlpha.toFixed(4)})`
-            oCtx.stroke()
+          let started = false
+          for (let j = 0; j < lcfs.length; j++) {
+            const p = slicePts[j]
+            if (!p) continue
+            if (!started) { oCtx.moveTo(p.sx, p.sy); started = true }
+            else oCtx.lineTo(p.sx, p.sy)
           }
+          if (!started) continue
+          oCtx.closePath()
+
+          oCtx.strokeStyle = `rgba(${sr},${sg},${sb},${passAlpha.toFixed(4)})`
+          oCtx.stroke()
         }
       }
     }
@@ -835,7 +800,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
       for (const s of sliceOrder) {
         const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-        const legAlpha = legAlphaBase * (0.5 + depthFrac * 0.5) * pathFactor[s]
+        const legAlpha = legAlphaBase * (0.85 + depthFrac * 0.15) * pathFactor[s]
         if (legAlpha < 0.0002) continue
         const phi = phis[s]
 
@@ -958,7 +923,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           if (!p2d) continue
 
           const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-          const gAlpha = strikeAlpha * (0.5 + depthFrac * 0.5)
+          const gAlpha = strikeAlpha * (0.85 + depthFrac * 0.15)
           if (gAlpha < 0.001) continue
 
           // Tight glow — matches divertor leg width on screen
