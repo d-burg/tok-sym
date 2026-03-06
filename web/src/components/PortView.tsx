@@ -562,17 +562,29 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       phis.push(portCfg.plasmaPhiMin + (portCfg.plasmaPhiMax - portCfg.plasmaPhiMin) * (i / (nSlicesPlasma - 1)))
     }
 
+    // Pre-compute trig per slice — eliminates ~190k redundant Math.cos/sin
+    // calls that were previously computed inside toroidal() for every point.
+    const cosPhis = new Float64Array(nSlicesPlasma)
+    const sinPhis = new Float64Array(nSlicesPlasma)
+    for (let s = 0; s < nSlicesPlasma; s++) {
+      cosPhis[s] = Math.cos(phis[s])
+      sinPhis[s] = Math.sin(phis[s])
+    }
+    // Reusable Vec3 for projections — avoids allocating ~70k temporary
+    // objects per frame that toroidal() would otherwise create.
+    const tmpV: Vec3 = { x: 0, y: 0, z: 0 }
+
     const grid: (ScreenPt | null)[][] = []
     const sliceDepths: number[] = []
 
     for (let s = 0; s < nSlicesPlasma; s++) {
-      const phi = phis[s]
+      const cp = cosPhis[s], sp = sinPhis[s]
       const row: (ScreenPt | null)[] = []
       let depthSum = 0
       let depthCount = 0
       for (const [R, Z] of lcfs) {
-        const p3d = toroidal(R, Z, phi)
-        const p2d = cam.project(p3d)
+        tmpV.x = R * cp; tmpV.y = R * sp; tmpV.z = Z
+        const p2d = cam.project(tmpV)
         if (p2d) {
           row.push({ sx: p2d.sx, sy: p2d.sy, depth: p2d.depth })
           depthSum += p2d.depth
@@ -610,11 +622,10 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     const pathFactor: number[] = []
     let pathMin = Infinity
     for (let s = 0; s < nSlicesPlasma; s++) {
-      const phi = phis[s]
-      const dx = rGeo * Math.cos(phi) - portCfg.camR
-      const dy = rGeo * Math.sin(phi)
+      const dx = rGeo * cosPhis[s] - portCfg.camR
+      const dy = rGeo * sinPhis[s]
       const dist = Math.sqrt(dx * dx + dy * dy)
-      const faceOn = Math.abs(rGeo - portCfg.camR * Math.cos(phi))
+      const faceOn = Math.abs(rGeo - portCfg.camR * cosPhis[s])
       const pf = faceOn > 0.01 ? dist / faceOn : 10.0
       pathFactor.push(pf)
       if (pf < pathMin) pathMin = pf
@@ -623,6 +634,57 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // Cap at 4.0 to prevent extreme inter-slice contrast at tangential views
     for (let s = 0; s < nSlicesPlasma; s++) {
       pathFactor[s] = Math.min(pathFactor[s] / pathMin, 4.0)
+    }
+
+    // ── Pre-project emission shell contours ──
+    // Moves ~49k projection calls out of the draw loop so shell rendering
+    // becomes pure canvas operations (flat-array reads → lineTo).  Each
+    // shell contour (inner + outer) is stored as a flat Float64Array with
+    // interleaved [sx, sy] pairs; NaN marks off-screen points.
+    const nPts = lcfs.length
+    const lcfsDR = new Float64Array(nPts)
+    const lcfsDZ = new Float64Array(nPts)
+    for (let j = 0; j < nPts; j++) {
+      lcfsDR[j] = lcfs[j][0] - cR
+      lcfsDZ[j] = lcfs[j][1] - cZ
+    }
+    const nShells = EMISSION_SHELLS.length
+    const shellOuterXY: Float64Array[] = new Array(nShells)
+    const shellInnerXY: Float64Array[] = new Array(nShells)
+    const stride = nPts * 2  // elements per slice in the flat array
+
+    for (let si = 0; si < nShells; si++) {
+      const shell = EMISSION_SHELLS[si]
+      const outerXY = new Float64Array(nSlicesPlasma * stride)
+      const innerXY = new Float64Array(nSlicesPlasma * stride)
+
+      for (let s = 0; s < nSlicesPlasma; s++) {
+        const cp = cosPhis[s], sp = sinPhis[s]
+        const base = s * stride
+
+        for (let j = 0; j < nPts; j++) {
+          const off = base + j * 2
+          const Ro = cR + lcfsDR[j] * shell.outerScale
+          const Zo = cZ + lcfsDZ[j] * shell.outerScale
+          tmpV.x = Ro * cp; tmpV.y = Ro * sp; tmpV.z = Zo
+          const p2d = cam.project(tmpV)
+          if (p2d) { outerXY[off] = p2d.sx; outerXY[off + 1] = p2d.sy }
+          else { outerXY[off] = NaN; outerXY[off + 1] = NaN }
+        }
+
+        for (let j = 0; j < nPts; j++) {
+          const off = base + j * 2
+          const Ri = cR + lcfsDR[j] * shell.innerScale
+          const Zi = cZ + lcfsDZ[j] * shell.innerScale
+          tmpV.x = Ri * cp; tmpV.y = Ri * sp; tmpV.z = Zi
+          const p2d = cam.project(tmpV)
+          if (p2d) { innerXY[off] = p2d.sx; innerXY[off + 1] = p2d.sy }
+          else { innerXY[off] = NaN; innerXY[off + 1] = NaN }
+        }
+      }
+
+      shellOuterXY[si] = outerXY
+      shellInnerXY[si] = innerXY
     }
 
     // ── Step 2: Draw filled surface to offscreen canvas ──
@@ -646,65 +708,49 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     oCtx.globalCompositeOperation = 'source-over'
 
-    // For each toroidal slice, scale emission shell contours in physical (R,Z)
-    // space and project to screen for uniform shell thickness.
+    // Draw emission shells from pre-projected contours (pure canvas ops).
+    // Shell contours were projected during grid build — the draw loop here
+    // just reads flat arrays and issues lineTo/fill calls with no math.
     for (const s of sliceOrder) {
       const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange // 0=far, 1=near
-      // Mild depth cue only — no pathFactor here.
-      // The limb glow (Step 2a) handles limb-brightening.  Applying pathFactor
-      // to the emission shells created a dark band at the inboard midplane
-      // because face-on slices (low pathFactor) are ~6× dimmer than tangential
-      // slices, and the inboard midplane is viewed nearly face-on.
       const sliceAlpha = baseAlpha * (0.85 + depthFrac * 0.15)
 
-      const slicePts = grid[s]
-      const phi = phis[s]
-
       // Visibility check — skip if fewer than 3 LCFS points project on-screen
+      const slicePts = grid[s]
       let visCount = 0
-      for (let j = 0; j < lcfs.length; j++) {
-        if (slicePts[j]) visCount++
-      }
+      for (let j = 0; j < nPts; j++) { if (slicePts[j]) visCount++ }
       if (visCount < 3) continue
 
-      // Draw concentric emission RINGS (annuli) peaked at the separatrix.
-      // Each ring is the area between innerScale and outerScale contours,
-      // rendered with evenodd fill so the interior stays transparent.
-      //
-      // Shell offsets are computed in physical (R,Z) space from the LCFS
-      // centroid, then projected to screen.  This ensures uniform shell
-      // thickness on both inboard and outboard sides — the old screen-space
-      // scaling produced thin shells on the inboard midplane due to
-      // perspective compression, creating a dark toroidal band artifact.
-      for (const shell of EMISSION_SHELLS) {
-        const shellAlpha = sliceAlpha * shell.weight
+      const base = s * stride
+
+      for (let si = 0; si < nShells; si++) {
+        const shellAlpha = sliceAlpha * EMISSION_SHELLS[si].weight
         if (shellAlpha < 0.0003) continue
+
+        const outerXY = shellOuterXY[si]
+        const innerXY = shellInnerXY[si]
 
         oCtx.beginPath()
 
-        // Outer contour (clockwise) — scaled in physical (R,Z) space
+        // Outer contour (clockwise)
         let started = false
-        for (let j = 0; j < lcfs.length; j++) {
-          const [R, Z] = lcfs[j]
-          const Ro = cR + (R - cR) * shell.outerScale
-          const Zo = cZ + (Z - cZ) * shell.outerScale
-          const p2d = cam.project(toroidal(Ro, Zo, phi))
-          if (!p2d) continue
-          if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
-          else oCtx.lineTo(p2d.sx, p2d.sy)
+        for (let j = 0; j < nPts; j++) {
+          const off = base + j * 2
+          const sx = outerXY[off]
+          if (sx !== sx) continue  // NaN = off-screen
+          if (!started) { oCtx.moveTo(sx, outerXY[off + 1]); started = true }
+          else oCtx.lineTo(sx, outerXY[off + 1])
         }
         oCtx.closePath()
 
-        // Inner contour (counter-clockwise — traced in reverse)
+        // Inner contour (counter-clockwise — reversed)
         started = false
-        for (let j = lcfs.length - 1; j >= 0; j--) {
-          const [R, Z] = lcfs[j]
-          const Ri = cR + (R - cR) * shell.innerScale
-          const Zi = cZ + (Z - cZ) * shell.innerScale
-          const p2d = cam.project(toroidal(Ri, Zi, phi))
-          if (!p2d) continue
-          if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
-          else oCtx.lineTo(p2d.sx, p2d.sy)
+        for (let j = nPts - 1; j >= 0; j--) {
+          const off = base + j * 2
+          const sx = innerXY[off]
+          if (sx !== sx) continue
+          if (!started) { oCtx.moveTo(sx, innerXY[off + 1]); started = true }
+          else oCtx.lineTo(sx, innerXY[off + 1])
         }
         oCtx.closePath()
 
@@ -729,6 +775,10 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       for (const [R] of lcfs) rContourSum += R
       const contourLimb = Math.pow(rGeo / (rContourSum / lcfs.length), LIMB_EXPONENT * 0.5)
 
+      // Set stroke style constants once (saves ~1120 redundant state changes)
+      oCtx.lineCap = 'round'
+      oCtx.lineJoin = 'round'
+
       for (const s of sliceOrder) {
         const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
         const sliceLimbAlpha = limbAlpha * (0.85 + depthFrac * 0.15) * pathFactor[s] * contourLimb
@@ -741,11 +791,9 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
           oCtx.beginPath()
           oCtx.lineWidth = pass.lineWidth
-          oCtx.lineCap = 'round'
-          oCtx.lineJoin = 'round'
 
           let started = false
-          for (let j = 0; j < lcfs.length; j++) {
+          for (let j = 0; j < nPts; j++) {
             const p = slicePts[j]
             if (!p) continue
             if (!started) { oCtx.moveTo(p.sx, p.sy); started = true }
@@ -798,14 +846,47 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         { lineWidth: 1.5, alphaScale: 0.55 },  // bright core
       ]
 
+      // Pre-project leg points for all slices (eliminates 2/3 of per-pass projections)
+      const innerLen = innerLeg.length, outerLen = outerLeg.length
+      const innerLegXY = new Float64Array(nSlicesPlasma * innerLen * 2)
+      const outerLegXY = new Float64Array(nSlicesPlasma * outerLen * 2)
+      for (let s = 0; s < nSlicesPlasma; s++) {
+        const cp = cosPhis[s], sp = sinPhis[s]
+        const iBase = s * innerLen * 2
+        for (let j = 0; j < innerLen; j++) {
+          const off = iBase + j * 2
+          const R = innerLeg[j][0], Z = innerLeg[j][1]
+          tmpV.x = R * cp; tmpV.y = R * sp; tmpV.z = Z
+          const p2d = cam.project(tmpV)
+          if (p2d) { innerLegXY[off] = p2d.sx; innerLegXY[off + 1] = p2d.sy }
+          else { innerLegXY[off] = NaN; innerLegXY[off + 1] = NaN }
+        }
+        const oBase = s * outerLen * 2
+        for (let j = 0; j < outerLen; j++) {
+          const off = oBase + j * 2
+          const R = outerLeg[j][0], Z = outerLeg[j][1]
+          tmpV.x = R * cp; tmpV.y = R * sp; tmpV.z = Z
+          const p2d = cam.project(tmpV)
+          if (p2d) { outerLegXY[off] = p2d.sx; outerLegXY[off + 1] = p2d.sy }
+          else { outerLegXY[off] = NaN; outerLegXY[off + 1] = NaN }
+        }
+      }
+
+      // Build leg descriptor array (skip legs with < 2 points)
+      const legs: { xy: Float64Array; len: number }[] = []
+      if (innerLen >= 2) legs.push({ xy: innerLegXY, len: innerLen })
+      if (outerLen >= 2) legs.push({ xy: outerLegXY, len: outerLen })
+
+      oCtx.lineCap = 'round'
+      oCtx.lineJoin = 'round'
+
       for (const s of sliceOrder) {
         const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
         const legAlpha = legAlphaBase * (0.85 + depthFrac * 0.15) * pathFactor[s]
         if (legAlpha < 0.0002) continue
-        const phi = phis[s]
 
-        for (const leg of [innerLeg, outerLeg]) {
-          if (leg.length < 2) continue
+        for (const { xy, len } of legs) {
+          const base = s * len * 2
 
           for (const pass of legPasses) {
             const passAlpha = legAlpha * pass.alphaScale
@@ -813,15 +894,13 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
             oCtx.beginPath()
             oCtx.lineWidth = pass.lineWidth
-            oCtx.lineCap = 'round'
-            oCtx.lineJoin = 'round'
             let started = false
-            for (const [R, Z] of leg) {
-              const p3d = toroidal(R, Z, phi)
-              const p2d = cam.project(p3d)
-              if (!p2d) continue
-              if (!started) { oCtx.moveTo(p2d.sx, p2d.sy); started = true }
-              else oCtx.lineTo(p2d.sx, p2d.sy)
+            for (let j = 0; j < len; j++) {
+              const off = base + j * 2
+              const sx = xy[off]
+              if (sx !== sx) continue  // NaN = off-screen
+              if (!started) { oCtx.moveTo(sx, xy[off + 1]); started = true }
+              else oCtx.lineTo(sx, xy[off + 1])
             }
             if (!started) continue
             oCtx.strokeStyle = `rgba(${lr},${lg},${lb},${passAlpha.toFixed(4)})`
