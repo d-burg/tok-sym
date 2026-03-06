@@ -517,26 +517,79 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       return
     }
 
-    const lcfsRaw = subsample(snapshot.separatrix.points, 35)
     const elmActive = snapshot.elm_active
     const disrupted = snapshot.disrupted
     const xpZ = snapshot.xpoint_z
+    const xpR = snapshot.xpoint_r
+    const hasXpoint = xpR > 0 && xpZ < -0.01
 
-    // ── Poloidal clipping: only render LCFS above the X-point ──
-    // During ramp-up/ramp-down, the equilibrium is evolving rapidly and the
-    // LCFS contour below the X-point can produce erroneous glowing strips
-    // that cross the vacuum region.  We clip the contour to points whose Z
-    // is above the X-point (with a small margin) unless the plasma is in
-    // stationary H-mode with visible divertor legs — in that case the lower
-    // separatrix region is rendered via the divertor-leg ribbons instead.
-    const showBelowXpt = snapshot.in_hmode && snapshot.xpoint_r > 0 && !disrupted
-    const lcfs = lcfsRaw.filter(([, Z]) => {
-      // If we have a valid x-point, clip points that are far below it
-      if (xpZ < -0.01 && !showBelowXpt) {
-        return Z > xpZ + 0.02  // small margin to keep contour smooth at x-point
-      }
-      return true
+    // ── Edge contour for emission shells and limb glow ──
+    // For diverted plasmas, the separatrix (and near-separatrix contours
+    // like ψ_N ≈ 0.995) include divertor legs — the contour is NOT a
+    // closed loop.  When canvas closePath() bridges the 1.5+ m gap between
+    // the leg endpoints, it creates a bright artifact line across the
+    // entire plasma.
+    //
+    // FIX: Filter out points below the x-point to get just the MAIN PLASMA
+    // BODY — a naturally closed loop.  This matches the gold separatrix
+    // visible in the equilibrium panel above the x-point.  The divertor
+    // legs are rendered separately (below) from the full separatrix data.
+    //
+    // For limited plasmas (no x-point), use the full separatrix as-is.
+    const nFlux = snapshot.flux_surfaces?.length ?? 0
+    const lcfsContour = (hasXpoint && nFlux > 0)
+      ? snapshot.flux_surfaces[nFlux - 1]  // ψ_N ≈ 0.995 — closest to separatrix
+      : snapshot.separatrix
+
+    // Filter: keep only the main plasma body (above x-point).
+    // The margin above xpZ avoids x-point vicinity points where the
+    // contour narrows, and ensures only the D-shaped main body remains.
+    //
+    // After filtering, the remaining points are NOT in closed-loop order
+    // (marching squares traces through the x-point, so removing leg
+    // points creates a discontinuity in the sequence).  We sort by
+    // poloidal angle around the centroid to reconstruct a proper closed
+    // contour — this works because the main plasma body is star-shaped
+    // from its centroid.
+    const lcfsAboveXp: [number, number][] = hasXpoint
+      ? lcfsContour.points.filter(([, Z]) => Z > xpZ + 0.05)
+      : lcfsContour.points
+
+    // Compute centroid then sort by poloidal angle for closed-loop ordering
+    let crSum = 0, czSum = 0
+    for (const [R, Z] of lcfsAboveXp) { crSum += R; czSum += Z }
+    const cR = crSum / lcfsAboveXp.length
+    const cZ = czSum / lcfsAboveXp.length
+    const lcfsSorted = [...lcfsAboveXp].sort((a, b) => {
+      const angA = Math.atan2(a[1] - cZ, a[0] - cR)
+      const angB = Math.atan2(b[1] - cZ, b[0] - cR)
+      return angA - angB
     })
+    const lcfs = subsample(lcfsSorted, 35)
+
+    // Extract below-X-point separatrix points for divertor leg rendering.
+    // Use the FULL (un-subsampled) separatrix for smooth legs.
+    const divertorLegPts: [number, number][] = hasXpoint
+      ? snapshot.separatrix.points.filter(([, Z]) => Z <= xpZ + 0.01)
+      : []
+
+    // ── Plasma intensity factor ──
+    // During ramp-up/ramp-down the equilibrium evolves rapidly and the LCFS
+    // contour is noisy, producing flickering artifacts if rendered at full
+    // intensity.  We use βN as a proxy for plasma establishment: the glow
+    // fades in smoothly as βN rises and fades out as it drops.
+    // βN < 0.15 → skip rendering entirely (too noisy to be useful)
+    // βN 0.15–0.5 → ramp from 0 to 1
+    // βN > 0.5 → full intensity
+    const betaN = snapshot.beta_n ?? 0
+    if (betaN < 0.15 && !disrupted) {
+      // Plasma too faint — just show wall and a dim label
+      if (wallCacheRef.current) {
+        ctx.drawImage(wallCacheRef.current.nearCanvas, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
+      }
+      return
+    }
+    const plasmaIntensity = disrupted ? 1.0 : Math.min((betaN - 0.15) / 0.35, 1.0)
 
     // ── Step 1: Build projection grid ──
     const nSlicesPlasma = portCfg.nPlasmaSlices
@@ -620,7 +673,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     // Per-machine opacity: look up scale factor from device ID
     const opacityScale = (deviceId && DEVICE_OPACITY_SCALE[deviceId]) ?? DEFAULT_OPACITY_SCALE
-    const baseAlpha = (elmActive && !disrupted ? SURFACE_ELM_ALPHA : SURFACE_BASE_ALPHA) * opacityScale
+    const baseAlpha = (elmActive && !disrupted ? SURFACE_ELM_ALPHA : SURFACE_BASE_ALPHA) * opacityScale * plasmaIntensity
 
     // Sort slices by depth: back-to-front (painter's algorithm)
     const sliceOrder = Array.from({ length: nSlicesPlasma }, (_, i) => i)
@@ -710,7 +763,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     //  2. Poloidal R-weighting (secondary) — within each slice, inboard
     //     segments (small R, tighter curvature) have slightly longer paths.
     {
-      const limbAlpha = LIMB_BASE_ALPHA * opacityScale
+      const limbAlpha = LIMB_BASE_ALPHA * opacityScale * plasmaIntensity
         * (elmActive && !disrupted ? 1.8 : 1.0)
 
       // Pre-compute sector boundaries and mild R-based poloidal weighting
@@ -765,12 +818,33 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       }
     }
 
-    // ── Step 2b: Draw divertor legs as toroidally-swept ribbons ──
+    // ── Step 2b: Draw divertor legs from actual separatrix geometry ──
+    // Use the real separatrix points below the X-point (extracted above),
+    // split into inner leg (R < x-point R) and outer leg (R > x-point R).
+    // This ensures the 3D legs match the equilibrium cross-section exactly.
     let strikePointRZ: [number, number][] = []
-    if (snapshot.xpoint_r > 0) {
-      const [innerLeg, outerLeg] = buildDivertorLegs(snapshot.xpoint_r, snapshot.xpoint_z)
-      const innerRibbon = buildLegRibbon(innerLeg, LEG_HALF_WIDTH)
-      const outerRibbon = buildLegRibbon(outerLeg, LEG_HALF_WIDTH)
+    const showLegs = hasXpoint && snapshot.in_hmode && !disrupted && divertorLegPts.length >= 3
+    if (showLegs) {
+      // Split below-X-point points into inner and outer legs
+      const innerLeg: [number, number][] = []
+      const outerLeg: [number, number][] = []
+      for (const pt of divertorLegPts) {
+        if (pt[0] < xpR - 0.01) innerLeg.push(pt)
+        else if (pt[0] > xpR + 0.01) outerLeg.push(pt)
+        // Points very near xpR are near the x-point itself — skip
+      }
+      // Sort each leg by Z descending (x-point at top, strike point at bottom)
+      innerLeg.sort((a, b) => b[1] - a[1])
+      outerLeg.sort((a, b) => b[1] - a[1])
+
+      // Prepend the x-point itself so legs connect smoothly to the main LCFS
+      const xPt: [number, number] = [xpR, xpZ]
+      if (innerLeg.length > 0) innerLeg.unshift(xPt)
+      if (outerLeg.length > 0) outerLeg.unshift(xPt)
+
+      // Build thin ribbons from the real leg geometry
+      const innerRibbon = innerLeg.length >= 2 ? buildLegRibbon(innerLeg, LEG_HALF_WIDTH) : []
+      const outerRibbon = outerLeg.length >= 2 ? buildLegRibbon(outerLeg, LEG_HALF_WIDTH) : []
 
       // Leg color: slightly brighter/whiter than bulk plasma
       const lr = disrupted ? 220 : 140
@@ -802,11 +876,9 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       }
 
       // Save strike point positions for main-canvas glow rendering
-      // (drawn after composite so warm glow isn't swamped by cyan plasma)
-      strikePointRZ = [
-        innerLeg[innerLeg.length - 1],
-        outerLeg[outerLeg.length - 1],
-      ]
+      // Strike points are the lowest Z in each leg
+      if (innerLeg.length > 0) strikePointRZ.push(innerLeg[innerLeg.length - 1])
+      if (outerLeg.length > 0) strikePointRZ.push(outerLeg[outerLeg.length - 1])
     }
 
     // ── Step 3: Composite blurred surface onto main canvas ──

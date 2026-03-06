@@ -684,9 +684,13 @@ impl Simulation {
                 grid_r_min, grid_r_max, grid_z_min, grid_z_max,
                 self.eq_nr, self.eq_nz,
             );
-            let levels: Vec<f64> = (1..=self.n_flux_surfaces)
+            let mut levels: Vec<f64> = (1..=self.n_flux_surfaces)
                 .map(|i| i as f64 / (self.n_flux_surfaces + 1) as f64)
                 .collect();
+            // Add a near-separatrix contour at ψ_N=0.995 for edge emission
+            // rendering in the 3D port view.  This closed contour sits just
+            // inside the separatrix with no divertor-leg topology.
+            levels.push(0.995);
             contour::extract_contours(
                 &grid, self.eq_nr, self.eq_nz,
                 grid_r_min, grid_r_max, grid_z_min, grid_z_max,
