@@ -20,6 +20,8 @@ interface ScalarParam {
   precision: number
 }
 
+type MagneticConfig = 'LowerSingleNull' | 'DoubleNull' | 'UpperSingleNull'
+
 interface Props {
   deviceId: string
   onRun: (deviceId: string, programJson: string) => void
@@ -31,6 +33,8 @@ interface Props {
   onDurationChange: (d: number | null) => void
   basePreset: PresetId
   onPresetChange: (p: PresetId) => void
+  configOverride: MagneticConfig | null
+  onConfigChange: (cfg: MagneticConfig | null) => void
 }
 
 /* ─── Parameter definitions ─────────────────────────────── */
@@ -122,6 +126,8 @@ export default function ShotPlanner({
   onDurationChange,
   basePreset,
   onPresetChange,
+  configOverride,
+  onConfigChange,
 }: Props) {
   // Load the base program from the selected preset
   const baseProgram = useMemo(() => getPreset(deviceId, basePreset), [deviceId, basePreset])
@@ -180,8 +186,13 @@ export default function ShotPlanner({
       }
     }
 
+    // Apply magnetic config override
+    if (configOverride) {
+      modified.config_override = configOverride
+    }
+
     onRun(deviceId, JSON.stringify(modified))
-  }, [baseProgram, overrides, durationOverride, deviceId, onRun])
+  }, [baseProgram, overrides, durationOverride, configOverride, deviceId, onRun])
 
   if (!baseProgram || !device) {
     return (
@@ -238,6 +249,35 @@ export default function ShotPlanner({
             ))}
           </div>
         </div>
+
+        {/* Magnetic config selector — DIII-D only */}
+        {deviceId === 'diiid' && (
+          <div>
+            <label className="text-[10px] text-gray-500 uppercase tracking-wider">Magnetic configuration</label>
+            <div className="flex rounded overflow-hidden border border-gray-700 mt-1">
+              {([
+                ['LowerSingleNull', 'Lower SN'],
+                ['DoubleNull', 'Double Null'],
+                ['UpperSingleNull', 'Upper SN'],
+              ] as [MagneticConfig, string][]).map(([cfg, label]) => (
+                <button
+                  key={cfg}
+                  onClick={() => onConfigChange(configOverride === cfg ? null : cfg)}
+                  className={`flex-1 px-2 py-1.5 text-xs font-semibold transition-colors cursor-pointer
+                    ${
+                      configOverride === cfg
+                        ? 'bg-purple-600 text-white'
+                        : configOverride === null && cfg === 'LowerSingleNull'
+                          ? 'bg-gray-700 text-gray-300'
+                          : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Duration */}
         <div>
@@ -327,7 +367,7 @@ export default function ShotPlanner({
       {/* Footer */}
       <div className="p-3 border-t border-gray-800 space-y-2">
         <button
-          onClick={() => { onOverridesChange({}); onDurationChange(null) }}
+          onClick={() => { onOverridesChange({}); onDurationChange(null); onConfigChange(null) }}
           className="w-full px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold
                      transition-colors cursor-pointer"
         >

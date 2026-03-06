@@ -62,6 +62,7 @@ export interface DischargeProgram {
   d2_puff: WaveformPoint[]
   neon_puff: WaveformPoint[]
   duration: number
+  config_override?: string
 }
 
 export function getDevices(): Device[] {

@@ -45,10 +45,11 @@ pub fn extract_contours(
         .collect()
 }
 
-/// Extract a single contour at the given level using marching squares.
-/// Returns line segments as a flat list of (R, Z) points.
-/// Consecutive pairs of points form line segments.
-fn march_squares(
+/// Generate raw marching squares segments (endpoint pairs) without chaining.
+///
+/// Returns a flat list of (R, Z) points where consecutive pairs form
+/// line segments: [(seg0_start, seg0_end), (seg1_start, seg1_end), ...].
+fn march_squares_raw(
     grid: &[f64],
     nr: usize,
     nz: usize,
@@ -168,8 +169,42 @@ fn march_squares(
         }
     }
 
-    // Chain segments into ordered contour paths
+    segments
+}
+
+/// Extract a single contour at the given level using marching squares.
+/// Returns only the longest chain (suitable for flux surfaces).
+fn march_squares(
+    grid: &[f64],
+    nr: usize,
+    nz: usize,
+    r_min: f64,
+    z_min: f64,
+    dr: f64,
+    dz: f64,
+    level: f64,
+) -> Vec<(f64, f64)> {
+    let segments = march_squares_raw(grid, nr, nz, r_min, z_min, dr, dz, level);
     chain_segments(segments)
+}
+
+/// Extract all significant chains at a given level using marching squares.
+/// Returns all chains with at least `min_chain_points` points, concatenated.
+/// The frontend renderer detects jump discontinuities between chains and
+/// starts new sub-paths automatically.
+fn march_squares_all_chains(
+    grid: &[f64],
+    nr: usize,
+    nz: usize,
+    r_min: f64,
+    z_min: f64,
+    dr: f64,
+    dz: f64,
+    level: f64,
+    min_chain_points: usize,
+) -> Vec<(f64, f64)> {
+    let segments = march_squares_raw(grid, nr, nz, r_min, z_min, dr, dz, level);
+    chain_all_segments(segments, min_chain_points)
 }
 
 /// Chain disconnected line segments into ordered polylines, returning
@@ -241,6 +276,114 @@ fn chain_segments(segments: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     best_chain
 }
 
+/// Chain disconnected line segments into ordered polylines, returning
+/// **all chains** with at least `min_points` points.  Chains are
+/// concatenated directly — the renderer's jump-threshold detection
+/// handles the discontinuities between them.
+///
+/// This is needed for double-null separatrix topology where the ψ=0
+/// contour forms a figure-8 with divertor legs as separate chains.
+fn chain_all_segments(segments: Vec<(f64, f64)>, min_points: usize) -> Vec<(f64, f64)> {
+    if segments.len() < 2 {
+        return segments;
+    }
+
+    let n_segs = segments.len() / 2;
+    let mut used = vec![false; n_segs];
+    let mut all_chains: Vec<Vec<(f64, f64)>> = Vec::new();
+
+    let dist2 = |a: (f64, f64), b: (f64, f64)| -> f64 {
+        (a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)
+    };
+
+    let tolerance = 1e-10;
+
+    for start in 0..n_segs {
+        if used[start] {
+            continue;
+        }
+
+        used[start] = true;
+        let mut chain = vec![segments[start * 2], segments[start * 2 + 1]];
+
+        // Extend forward from tail
+        loop {
+            let tail = *chain.last().unwrap();
+            let mut found = false;
+
+            for i in 0..n_segs {
+                if used[i] {
+                    continue;
+                }
+                let p0 = segments[i * 2];
+                let p1 = segments[i * 2 + 1];
+
+                if dist2(tail, p0) < tolerance {
+                    chain.push(p1);
+                    used[i] = true;
+                    found = true;
+                    break;
+                } else if dist2(tail, p1) < tolerance {
+                    chain.push(p0);
+                    used[i] = true;
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                break;
+            }
+        }
+
+        // Also extend backward from head
+        loop {
+            let head = chain[0];
+            let mut found = false;
+
+            for i in 0..n_segs {
+                if used[i] {
+                    continue;
+                }
+                let p0 = segments[i * 2];
+                let p1 = segments[i * 2 + 1];
+
+                if dist2(head, p1) < tolerance {
+                    chain.insert(0, p0);
+                    used[i] = true;
+                    found = true;
+                    break;
+                } else if dist2(head, p0) < tolerance {
+                    chain.insert(0, p1);
+                    used[i] = true;
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                break;
+            }
+        }
+
+        if chain.len() >= min_points {
+            all_chains.push(chain);
+        }
+    }
+
+    // Sort chains by length (longest first) so the main separatrix is drawn first
+    all_chains.sort_by(|a, b| b.len().cmp(&a.len()));
+
+    // Concatenate all chains — the renderer's jump-threshold detection
+    // will handle the gaps between chains
+    let total: usize = all_chains.iter().map(|c| c.len()).sum();
+    let mut result = Vec::with_capacity(total);
+    for chain in all_chains {
+        result.extend(chain);
+    }
+    result
+}
+
 /// Extract flux surfaces as ordered contour polylines.
 ///
 /// Returns `n_surfaces` contours at evenly spaced normalized ψ values
@@ -262,19 +405,32 @@ pub fn extract_flux_surfaces(
 }
 
 /// Extract the separatrix (ψ_norm = 1.0, or equivalently ψ = 0).
+///
+/// Uses all-chains extraction to preserve divertor legs in double-null
+/// configurations (where the ψ=0 contour forms a figure-8 topology
+/// with separate leg chains extending to the divertor targets).
+///
+/// If `bounds` is `Some((r_min, r_max, z_min, z_max))`, those bounds are
+/// used for the grid instead of `eq.grid_bounds()`.  This is important when
+/// the equilibrium shape uses a reduced ε (e.g. DN) but we still want the
+/// extraction grid to cover the full device extent (including divertor legs
+/// beyond the X-points).
 pub fn extract_separatrix(
     eq: &crate::equilibrium::CerfonEquilibrium,
     nr: usize,
     nz: usize,
+    bounds: Option<(f64, f64, f64, f64)>,
 ) -> Contour {
-    let (r_min, r_max, z_min, z_max) = eq.grid_bounds();
+    let (r_min, r_max, z_min, z_max) = bounds.unwrap_or_else(|| eq.grid_bounds());
     let grid = eq.psi_grid(r_min, r_max, z_min, z_max, nr, nz);
 
-    let contours = extract_contours(&grid, nr, nz, r_min, r_max, z_min, z_max, &[0.0]);
-    contours.into_iter().next().unwrap_or(Contour {
-        level: 0.0,
-        points: vec![],
-    })
+    let dr = (r_max - r_min) / (nr - 1) as f64;
+    let dz = (z_max - z_min) / (nz - 1) as f64;
+
+    // Use all-chains with min 5 points to include divertor legs
+    // while filtering out tiny noise fragments
+    let points = march_squares_all_chains(&grid, nr, nz, r_min, z_min, dr, dz, 0.0, 5);
+    Contour { level: 0.0, points }
 }
 
 #[cfg(test)]
@@ -320,7 +476,7 @@ mod tests {
         let device = crate::devices::diiid();
         let eq = crate::equilibrium::CerfonEquilibrium::from_device(&device).unwrap();
 
-        let sep = extract_separatrix(&eq, 64, 64);
+        let sep = extract_separatrix(&eq, 64, 64, None);
         assert!(
             !sep.points.is_empty(),
             "Separatrix should have points"

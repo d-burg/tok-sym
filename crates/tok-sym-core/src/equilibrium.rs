@@ -413,6 +413,208 @@ fn assemble_lsn_system(shape: &ShapeParams) -> ([f64; 144], [f64; 12]) {
     (mat, rhs)
 }
 
+/// Assemble the 12×12 system for an upper single null equilibrium.
+///
+/// Mirror of LSN: the X-point is above the midplane (+y), and the
+/// "lower crown" (bottom of plasma) carries the curvature constraint.
+fn assemble_usn_system(shape: &ShapeParams) -> ([f64; 144], [f64; 12]) {
+    let eps = shape.epsilon;
+    let kappa = shape.kappa;
+    let delta = shape.delta;
+    let a = shape.a_param;
+    let sq = shape.squareness;
+
+    let x_out = 1.0 + eps;
+    let x_in = 1.0 - eps;
+    let y_mid = 0.0;
+
+    // X-point above midplane for USN
+    let alpha = shape.x_point_alpha.unwrap_or(delta.asin());
+    let x_xpt = 1.0 - 1.05 * eps * delta;
+    let y_xpt = 1.05 * eps * kappa; // POSITIVE — above midplane
+
+    // Lower crown (bottom of plasma) — mirror of LSN upper crown
+    let x_bot = 1.0 - eps * delta;
+    let y_bot = -eps * kappa; // below midplane
+
+    let n1 = -(1.0 + sq).powi(2) / (eps * kappa * kappa);
+    let n2 = (1.0 - sq).powi(2) / (eps * kappa * kappa);
+    // N3 curvature at the lower crown (sign flipped vs LSN)
+    let n3 = -kappa / (eps * alpha.cos().powi(2));
+
+    let mut mat = [0.0f64; 144];
+    let mut rhs = [0.0f64; 12];
+
+    let set_row = |mat: &mut [f64; 144], row: usize, vals: &[f64; 12]| {
+        for j in 0..12 {
+            mat[row * 12 + j] = vals[j];
+        }
+    };
+
+    // Row 0: ψ = 0 at outboard midplane
+    set_row(&mut mat, 0, &psi_basis(x_out, y_mid));
+    rhs[0] = -psi_particular(x_out, a);
+
+    // Row 1: ψ = 0 at inboard midplane
+    set_row(&mut mat, 1, &psi_basis(x_in, y_mid));
+    rhs[1] = -psi_particular(x_in, a);
+
+    // Row 2: ψ = 0 at X-point (above midplane)
+    set_row(&mut mat, 2, &psi_basis(x_xpt, y_xpt));
+    rhs[2] = -psi_particular(x_xpt, a);
+
+    // Row 3: ∂ψ/∂x = 0 at X-point
+    set_row(&mut mat, 3, &dpsi_basis_dx(x_xpt, y_xpt));
+    rhs[3] = -dpsi_particular_dx(x_xpt, a);
+
+    // Row 4: ∂ψ/∂y = 0 at X-point
+    set_row(&mut mat, 4, &dpsi_basis_dy(x_xpt, y_xpt));
+    rhs[4] = 0.0;
+
+    // Row 5: ∂ψ/∂y = 0 at outboard midplane
+    set_row(&mut mat, 5, &dpsi_basis_dy(x_out, y_mid));
+    rhs[5] = 0.0;
+
+    // Row 6: ∂ψ/∂y = 0 at inboard midplane
+    set_row(&mut mat, 6, &dpsi_basis_dy(x_in, y_mid));
+    rhs[6] = 0.0;
+
+    // Row 7: Curvature at outboard midplane → elongation
+    let d2basis_dy2_out = d2psi_basis_dy2(x_out, y_mid);
+    let dbasis_dx_out = dpsi_basis_dx(x_out, y_mid);
+    let mut row7 = [0.0f64; 12];
+    for j in 0..12 {
+        row7[j] = n1 * dbasis_dx_out[j] + d2basis_dy2_out[j];
+    }
+    set_row(&mut mat, 7, &row7);
+    rhs[7] = -(n1 * dpsi_particular_dx(x_out, a) + d2psi_particular_dy2(x_out, a));
+
+    // Row 8: Curvature at inboard midplane → elongation
+    let d2basis_dy2_in = d2psi_basis_dy2(x_in, y_mid);
+    let dbasis_dx_in = dpsi_basis_dx(x_in, y_mid);
+    let mut row8 = [0.0f64; 12];
+    for j in 0..12 {
+        row8[j] = n2 * dbasis_dx_in[j] + d2basis_dy2_in[j];
+    }
+    set_row(&mut mat, 8, &row8);
+    rhs[8] = -(n2 * dpsi_particular_dx(x_in, a) + d2psi_particular_dy2(x_in, a));
+
+    // Row 9: ψ = 0 at lower crown (bottom of plasma)
+    set_row(&mut mat, 9, &psi_basis(x_bot, y_bot));
+    rhs[9] = -psi_particular(x_bot, a);
+
+    // Row 10: ∂ψ/∂x = 0 at lower crown (vertical tangent)
+    set_row(&mut mat, 10, &dpsi_basis_dx(x_bot, y_bot));
+    rhs[10] = -dpsi_particular_dx(x_bot, a);
+
+    // Row 11: Curvature at lower crown → triangularity
+    // N3 · ∂ψ/∂y + ∂²ψ/∂x² = 0 at (x_bot, y_bot)
+    // Note: for the lower crown we negate N3 because the curvature
+    // direction reverses relative to the upper crown in LSN.
+    let d2basis_dx2_bot = d2psi_basis_dx2(x_bot, y_bot);
+    let dbasis_dy_bot = dpsi_basis_dy(x_bot, y_bot);
+    let mut row11 = [0.0f64; 12];
+    for j in 0..12 {
+        row11[j] = -n3 * dbasis_dy_bot[j] + d2basis_dx2_bot[j];
+    }
+    set_row(&mut mat, 11, &row11);
+    rhs[11] = -(-n3 * 0.0 + d2psi_particular_dx2(x_bot, a));
+
+    (mat, rhs)
+}
+
+/// Assemble the 12×12 system for a double null (up-down symmetric) equilibrium.
+///
+/// For DN, up-down symmetry forces the odd basis functions (ψ₈–ψ₁₂) to zero,
+/// reducing to 7 unknowns (c₁–c₇).  We use the full 12×12 matrix with
+/// identity rows for c₈–c₁₂ = 0.
+///
+/// The 7 boundary conditions are:
+/// 1. ψ = 0 at outboard midplane
+/// 2. ψ = 0 at inboard midplane
+/// 3. ψ = 0 at lower X-point (upper is automatic by symmetry)
+/// 4. ∂ψ/∂x = 0 at lower X-point
+/// 5. ∂ψ/∂y = 0 at lower X-point
+/// 6. N1 curvature at outboard midplane
+/// 7. N2 curvature at inboard midplane
+fn assemble_dn_system(shape: &ShapeParams) -> ([f64; 144], [f64; 12]) {
+    let eps = shape.epsilon;
+    let kappa = shape.kappa;
+    let delta = shape.delta;
+    let a = shape.a_param;
+    let sq = shape.squareness;
+
+    let x_out = 1.0 + eps;
+    let x_in = 1.0 - eps;
+    let y_mid = 0.0;
+
+    // X-point location (lower) — upper is symmetric at +y_xpt
+    let x_xpt = 1.0 - 1.05 * eps * delta;
+    let y_xpt = -1.05 * eps * kappa;
+
+    let n1 = -(1.0 + sq).powi(2) / (eps * kappa * kappa);
+    let n2 = (1.0 - sq).powi(2) / (eps * kappa * kappa);
+
+    let mut mat = [0.0f64; 144];
+    let mut rhs = [0.0f64; 12];
+
+    let set_row = |mat: &mut [f64; 144], row: usize, vals: &[f64; 12]| {
+        for j in 0..12 {
+            mat[row * 12 + j] = vals[j];
+        }
+    };
+
+    // Row 0: ψ = 0 at outboard midplane
+    set_row(&mut mat, 0, &psi_basis(x_out, y_mid));
+    rhs[0] = -psi_particular(x_out, a);
+
+    // Row 1: ψ = 0 at inboard midplane
+    set_row(&mut mat, 1, &psi_basis(x_in, y_mid));
+    rhs[1] = -psi_particular(x_in, a);
+
+    // Row 2: ψ = 0 at lower X-point
+    set_row(&mut mat, 2, &psi_basis(x_xpt, y_xpt));
+    rhs[2] = -psi_particular(x_xpt, a);
+
+    // Row 3: ∂ψ/∂x = 0 at lower X-point
+    set_row(&mut mat, 3, &dpsi_basis_dx(x_xpt, y_xpt));
+    rhs[3] = -dpsi_particular_dx(x_xpt, a);
+
+    // Row 4: ∂ψ/∂y = 0 at lower X-point
+    set_row(&mut mat, 4, &dpsi_basis_dy(x_xpt, y_xpt));
+    rhs[4] = 0.0;
+
+    // Row 5: N1 curvature at outboard midplane → elongation
+    let d2basis_dy2_out = d2psi_basis_dy2(x_out, y_mid);
+    let dbasis_dx_out = dpsi_basis_dx(x_out, y_mid);
+    let mut row5 = [0.0f64; 12];
+    for j in 0..12 {
+        row5[j] = n1 * dbasis_dx_out[j] + d2basis_dy2_out[j];
+    }
+    set_row(&mut mat, 5, &row5);
+    rhs[5] = -(n1 * dpsi_particular_dx(x_out, a) + d2psi_particular_dy2(x_out, a));
+
+    // Row 6: N2 curvature at inboard midplane → elongation
+    let d2basis_dy2_in = d2psi_basis_dy2(x_in, y_mid);
+    let dbasis_dx_in = dpsi_basis_dx(x_in, y_mid);
+    let mut row6 = [0.0f64; 12];
+    for j in 0..12 {
+        row6[j] = n2 * dbasis_dx_in[j] + d2basis_dy2_in[j];
+    }
+    set_row(&mut mat, 6, &row6);
+    rhs[6] = -(n2 * dpsi_particular_dx(x_in, a) + d2psi_particular_dy2(x_in, a));
+
+    // Rows 7–11: enforce c₈ = c₉ = c₁₀ = c₁₁ = c₁₂ = 0 (odd basis = 0)
+    for k in 0..5 {
+        let row = 7 + k;
+        let col = 7 + k; // coefficients c₈–c₁₂ (indices 7–11)
+        mat[row * 12 + col] = 1.0;
+        rhs[row] = 0.0;
+    }
+
+    (mat, rhs)
+}
+
 // ─── Linear algebra (12×12 Gaussian elimination) ──────────────────────────
 
 /// Solve a 12×12 linear system Ax = b using Gaussian elimination with
@@ -478,9 +680,11 @@ impl CerfonEquilibrium {
     /// Solve for the equilibrium coefficients given shape parameters.
     pub fn solve(shape: &ShapeParams, r0: f64) -> Option<Self> {
         let (mat, rhs) = match shape.config {
-            MagneticConfig::LowerSingleNull => assemble_lsn_system(shape),
-            // For now, use LSN system for all configs (can add DN, limited later)
-            _ => assemble_lsn_system(shape),
+            MagneticConfig::LowerSingleNull | MagneticConfig::Limited => {
+                assemble_lsn_system(shape)
+            }
+            MagneticConfig::UpperSingleNull => assemble_usn_system(shape),
+            MagneticConfig::DoubleNull => assemble_dn_system(shape),
         };
 
         let coeffs = solve_12x12(&mat, &rhs)?;
@@ -646,14 +850,43 @@ impl CerfonEquilibrium {
         (self.axis.0 * self.r0, self.axis.1 * self.r0)
     }
 
-    /// Get the X-point location in physical coordinates.
+    /// Get the primary X-point location in physical coordinates.
+    /// For LSN/DN returns the lower X-point; for USN returns the upper.
     pub fn x_point_physical(&self) -> (f64, f64) {
         let eps = self.shape.epsilon;
         let kappa = self.shape.kappa;
         let delta = self.shape.delta;
         let x_xpt = 1.0 - 1.05 * eps * delta;
-        let y_xpt = -1.05 * eps * kappa;
-        (x_xpt * self.r0, y_xpt * self.r0)
+        match self.shape.config {
+            MagneticConfig::UpperSingleNull => {
+                let y_xpt = 1.05 * eps * kappa;
+                (x_xpt * self.r0, y_xpt * self.r0)
+            }
+            _ => {
+                let y_xpt = -1.05 * eps * kappa;
+                (x_xpt * self.r0, y_xpt * self.r0)
+            }
+        }
+    }
+
+    /// Get both X-point locations: (lower, upper).
+    /// Returns (None, None) for Limited; (Some, None) for LSN; etc.
+    pub fn x_points_physical(&self) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+        let eps = self.shape.epsilon;
+        let kappa = self.shape.kappa;
+        let delta = self.shape.delta;
+        let x_xpt = 1.0 - 1.05 * eps * delta;
+        let r_xpt = x_xpt * self.r0;
+        let z_lower = -1.05 * eps * kappa * self.r0;
+        let z_upper = 1.05 * eps * kappa * self.r0;
+        match self.shape.config {
+            MagneticConfig::Limited => (None, None),
+            MagneticConfig::LowerSingleNull => (Some((r_xpt, z_lower)), None),
+            MagneticConfig::UpperSingleNull => (None, Some((r_xpt, z_upper))),
+            MagneticConfig::DoubleNull => {
+                (Some((r_xpt, z_lower)), Some((r_xpt, z_upper)))
+            }
+        }
     }
 
     /// Grid bounds in physical coordinates that encompass the plasma + margin.
@@ -672,8 +905,11 @@ impl CerfonEquilibrium {
     /// This re-solves the coefficient system — fast (12×12 linear solve).
     pub fn update(&mut self, shape: &ShapeParams) -> bool {
         let (mat, rhs) = match shape.config {
-            MagneticConfig::LowerSingleNull => assemble_lsn_system(shape),
-            _ => assemble_lsn_system(shape),
+            MagneticConfig::LowerSingleNull | MagneticConfig::Limited => {
+                assemble_lsn_system(shape)
+            }
+            MagneticConfig::UpperSingleNull => assemble_usn_system(shape),
+            MagneticConfig::DoubleNull => assemble_dn_system(shape),
         };
 
         if let Some(coeffs) = solve_12x12(&mat, &rhs) {

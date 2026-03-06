@@ -31,6 +31,7 @@ export default function ControlRoom() {
   const [plannerDuration, setPlannerDuration] = useState<number | null>(null)
   const [plannerPreset, setPlannerPreset] = useState<PresetId>(routePreset)
   const [hasCustomProgram, setHasCustomProgram] = useState(false)
+  const [configOverride, setConfigOverride] = useState<'LowerSingleNull' | 'DoubleNull' | 'UpperSingleNull' | null>(null)
 
   const devices = useMemo(() => getDevices(), [])
 
@@ -54,6 +55,7 @@ export default function ControlRoom() {
     setPlannerOverrides({})
     setPlannerDuration(null)
     setHasCustomProgram(false)
+    setConfigOverride(null)
     controls.switchPreset(newDeviceId, activePreset)
   }
 
@@ -63,6 +65,7 @@ export default function ControlRoom() {
     setPlannerOverrides({})
     setPlannerDuration(null)
     setHasCustomProgram(false)
+    setConfigOverride(null)
     controls.switchPreset(activeDevice, newPreset)
   }
 
@@ -87,6 +90,7 @@ export default function ControlRoom() {
     setPlannerPreset(preset)
     setPlannerOverrides({})
     setPlannerDuration(null)
+    setConfigOverride(null)
   }
 
   return (
@@ -266,6 +270,8 @@ export default function ControlRoom() {
           onDurationChange={setPlannerDuration}
           basePreset={plannerPreset}
           onPresetChange={handlePlannerPresetChange}
+          configOverride={configOverride}
+          onConfigChange={setConfigOverride}
         />
       )}
     </div>

@@ -82,7 +82,10 @@ export interface Snapshot {
   axis_z: number
   xpoint_r: number
   xpoint_z: number
+  xpoint_upper_r: number
+  xpoint_upper_z: number
   is_limited: boolean
+  magnetic_config: string
 
   // Status
   status: SimStatus

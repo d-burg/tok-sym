@@ -460,7 +460,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     const disrupted = snapshot.disrupted
     const xpZ = snapshot.xpoint_z
     const xpR = snapshot.xpoint_r
-    const hasXpoint = xpR > 0 && xpZ < -0.01
+    const hasLowerXpoint = xpR > 0 && xpZ < -0.01
+    const hasUpperXpoint = (snapshot.xpoint_upper_r ?? 0) > 0 && (snapshot.xpoint_upper_z ?? 0) > 0.01
+    const hasXpoint = hasLowerXpoint || hasUpperXpoint
+    const xpUpperR = snapshot.xpoint_upper_r ?? 0
+    const xpUpperZ = snapshot.xpoint_upper_z ?? 0
 
     // ── Time delta for fade effects ──
     // Computed early so fades update even during early returns (betaN < 0.15).
@@ -504,11 +508,18 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // During ramp-up/ramp-down the near-edge surface can be fragmentary, so
     // we walk inward through flux surfaces until we find one with enough
     // points to form a proper contour (≥20 points above the X-point).
+    // Filter out divertor regions — bulk plasma only
+    const inBulkPlasma = ([, Z]: [number, number]): boolean => {
+      if (hasLowerXpoint && Z < xpZ + 0.02) return false
+      if (hasUpperXpoint && Z > xpUpperZ - 0.02) return false
+      return true
+    }
+
     const nFlux = snapshot.flux_surfaces.length
     let edgeSurface: [number, number][] = []
     for (let fi = nFlux - 1; fi >= 0; fi--) {
       const pts = snapshot.flux_surfaces[fi].points
-      const above = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.02) : pts
+      const above = hasXpoint ? pts.filter(inBulkPlasma) : pts
       if (above.length >= 20) {
         edgeSurface = above
         break
@@ -517,7 +528,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // Fallback: use separatrix points if no flux surface had enough points
     if (edgeSurface.length < 20) {
       const pts = snapshot.separatrix.points
-      edgeSurface = hasXpoint ? pts.filter(([, Z]) => Z > xpZ + 0.02) : pts
+      edgeSurface = hasXpoint ? pts.filter(inBulkPlasma) : pts
     }
 
     // Sort by poloidal angle from centroid → proper closed-loop ordering.
@@ -538,11 +549,15 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // inboard midplane, closing the gap.
     const lcfs = densifyContour(lcfsRaw, 0.10)
 
-    // Extract below-X-point separatrix points for divertor leg rendering.
+    // Extract divertor separatrix points for leg rendering.
     // Use the FULL (un-subsampled) actual separatrix for smooth legs.
-    const divertorLegPts: [number, number][] = hasXpoint
+    const lowerDivPts: [number, number][] = hasLowerXpoint
       ? snapshot.separatrix.points.filter(([, Z]) => Z <= xpZ + 0.01)
       : []
+    const upperDivPts: [number, number][] = hasUpperXpoint
+      ? snapshot.separatrix.points.filter(([, Z]) => Z >= xpUpperZ - 0.01)
+      : []
+    const divertorLegPts: [number, number][] = [...lowerDivPts, ...upperDivPts]
 
     // ── Plasma intensity factor ──
     // During ramp-up/ramp-down the equilibrium evolves rapidly and the LCFS
@@ -816,29 +831,51 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     }
 
     // ── Step 2b: Draw divertor legs from actual separatrix geometry ──
-    // Use the real separatrix points below the X-point (extracted above),
-    // split into inner leg (R < x-point R) and outer leg (R > x-point R).
-    // Rendered as diffuse stroked centerlines (multiple glow passes) rather
-    // than flat-filled ribbons, so they blend smoothly across toroidal slices.
+    // Split divertor points into individual legs (inner/outer for each X-point),
+    // then render as diffuse stroked centerlines across toroidal slices.
     let strikePointRZ: [number, number][] = []
     const showLegs = legFade > 0.01 && divertorLegPts.length >= 3
     if (showLegs) {
-      // Split below-X-point points into inner and outer legs
-      const innerLeg: [number, number][] = []
-      const outerLeg: [number, number][] = []
-      for (const pt of divertorLegPts) {
-        if (pt[0] < xpR - 0.01) innerLeg.push(pt)
-        else if (pt[0] > xpR + 0.01) outerLeg.push(pt)
-        // Points very near xpR are near the x-point itself — skip
-      }
-      // Sort each leg by Z descending (x-point at top, strike point at bottom)
-      innerLeg.sort((a, b) => b[1] - a[1])
-      outerLeg.sort((a, b) => b[1] - a[1])
+      // Build all legs: split each divertor region into inner/outer by X-point R
+      const allLegPts: [number, number][][] = []
 
-      // Prepend the x-point itself so legs connect smoothly to the main LCFS
-      const xPt: [number, number] = [xpR, xpZ]
-      if (innerLeg.length > 0) innerLeg.unshift(xPt)
-      if (outerLeg.length > 0) outerLeg.unshift(xPt)
+      // Lower divertor legs
+      if (hasLowerXpoint && lowerDivPts.length >= 2) {
+        const lowerInner: [number, number][] = []
+        const lowerOuter: [number, number][] = []
+        for (const pt of lowerDivPts) {
+          if (pt[0] < xpR - 0.01) lowerInner.push(pt)
+          else if (pt[0] > xpR + 0.01) lowerOuter.push(pt)
+        }
+        // Sort Z descending (x-point at top → strike at bottom)
+        lowerInner.sort((a, b) => b[1] - a[1])
+        lowerOuter.sort((a, b) => b[1] - a[1])
+        const xPtLower: [number, number] = [xpR, xpZ]
+        if (lowerInner.length >= 2) { lowerInner.unshift(xPtLower); allLegPts.push(lowerInner) }
+        if (lowerOuter.length >= 2) { lowerOuter.unshift(xPtLower); allLegPts.push(lowerOuter) }
+        // Strike points — last = lowest Z in each leg
+        if (lowerInner.length > 0) strikePointRZ.push(lowerInner[lowerInner.length - 1])
+        if (lowerOuter.length > 0) strikePointRZ.push(lowerOuter[lowerOuter.length - 1])
+      }
+
+      // Upper divertor legs
+      if (hasUpperXpoint && upperDivPts.length >= 2) {
+        const upperInner: [number, number][] = []
+        const upperOuter: [number, number][] = []
+        for (const pt of upperDivPts) {
+          if (pt[0] < xpUpperR - 0.01) upperInner.push(pt)
+          else if (pt[0] > xpUpperR + 0.01) upperOuter.push(pt)
+        }
+        // Sort Z ascending (x-point at bottom → strike at top)
+        upperInner.sort((a, b) => a[1] - b[1])
+        upperOuter.sort((a, b) => a[1] - b[1])
+        const xPtUpper: [number, number] = [xpUpperR, xpUpperZ]
+        if (upperInner.length >= 2) { upperInner.unshift(xPtUpper); allLegPts.push(upperInner) }
+        if (upperOuter.length >= 2) { upperOuter.unshift(xPtUpper); allLegPts.push(upperOuter) }
+        // Strike points — last = highest Z in each leg
+        if (upperInner.length > 0) strikePointRZ.push(upperInner[upperInner.length - 1])
+        if (upperOuter.length > 0) strikePointRZ.push(upperOuter[upperOuter.length - 1])
+      }
 
       // Leg color: slightly brighter/whiter than bulk plasma
       const lr = disrupted ? 220 : 140
@@ -853,36 +890,25 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         { lineWidth: 1.5, alphaScale: 0.55 },  // bright core
       ]
 
-      // Pre-project leg points for all slices (eliminates 2/3 of per-pass projections)
-      const innerLen = innerLeg.length, outerLen = outerLeg.length
-      const innerLegXY = new Float64Array(nSlicesPlasma * innerLen * 2)
-      const outerLegXY = new Float64Array(nSlicesPlasma * outerLen * 2)
-      for (let s = 0; s < nSlicesPlasma; s++) {
-        const cp = cosPhis[s], sp = sinPhis[s]
-        const iBase = s * innerLen * 2
-        for (let j = 0; j < innerLen; j++) {
-          const off = iBase + j * 2
-          const R = innerLeg[j][0], Z = innerLeg[j][1]
-          tmpV.x = R * cp; tmpV.y = R * sp; tmpV.z = Z
-          const p2d = cam.project(tmpV)
-          if (p2d) { innerLegXY[off] = p2d.sx; innerLegXY[off + 1] = p2d.sy }
-          else { innerLegXY[off] = NaN; innerLegXY[off + 1] = NaN }
-        }
-        const oBase = s * outerLen * 2
-        for (let j = 0; j < outerLen; j++) {
-          const off = oBase + j * 2
-          const R = outerLeg[j][0], Z = outerLeg[j][1]
-          tmpV.x = R * cp; tmpV.y = R * sp; tmpV.z = Z
-          const p2d = cam.project(tmpV)
-          if (p2d) { outerLegXY[off] = p2d.sx; outerLegXY[off + 1] = p2d.sy }
-          else { outerLegXY[off] = NaN; outerLegXY[off + 1] = NaN }
-        }
-      }
-
-      // Build leg descriptor array (skip legs with < 2 points)
+      // Pre-project all leg points for all slices
       const legs: { xy: Float64Array; len: number }[] = []
-      if (innerLen >= 2) legs.push({ xy: innerLegXY, len: innerLen })
-      if (outerLen >= 2) legs.push({ xy: outerLegXY, len: outerLen })
+      for (const legPts of allLegPts) {
+        const legLen = legPts.length
+        const legXY = new Float64Array(nSlicesPlasma * legLen * 2)
+        for (let s = 0; s < nSlicesPlasma; s++) {
+          const cp = cosPhis[s], sp = sinPhis[s]
+          const sBase = s * legLen * 2
+          for (let j = 0; j < legLen; j++) {
+            const off = sBase + j * 2
+            const R = legPts[j][0], Z = legPts[j][1]
+            tmpV.x = R * cp; tmpV.y = R * sp; tmpV.z = Z
+            const p2d = cam.project(tmpV)
+            if (p2d) { legXY[off] = p2d.sx; legXY[off + 1] = p2d.sy }
+            else { legXY[off] = NaN; legXY[off + 1] = NaN }
+          }
+        }
+        if (legLen >= 2) legs.push({ xy: legXY, len: legLen })
+      }
 
       oCtx.lineCap = 'round'
       oCtx.lineJoin = 'round'
@@ -915,11 +941,6 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           }
         }
       }
-
-      // Save strike point positions for main-canvas glow rendering
-      // Strike points are the lowest Z in each leg
-      if (innerLeg.length > 0) strikePointRZ.push(innerLeg[innerLeg.length - 1])
-      if (outerLeg.length > 0) strikePointRZ.push(outerLeg[outerLeg.length - 1])
     }
 
     // ── Pre-project strike point positions for glow rendering ──

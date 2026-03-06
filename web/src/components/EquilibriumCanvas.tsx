@@ -167,10 +167,10 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       ctx.globalAlpha = 1
     }
 
-    // --- Draw X-point ---
-    if (snapshot && snapshot.xpoint_r > 0) {
-      const xp = toX(snapshot.xpoint_r)
-      const yp = toY(snapshot.xpoint_z)
+    // --- Draw X-point(s) ---
+    const drawXMark = (r: number, z: number) => {
+      const xp = toX(r)
+      const yp = toY(z)
       ctx.strokeStyle = '#ef4444'
       ctx.lineWidth = 2
       const s = 5
@@ -180,6 +180,12 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       ctx.moveTo(xp + s, yp - s)
       ctx.lineTo(xp - s, yp + s)
       ctx.stroke()
+    }
+    if (snapshot && snapshot.xpoint_r > 0) {
+      drawXMark(snapshot.xpoint_r, snapshot.xpoint_z)
+    }
+    if (snapshot && (snapshot.xpoint_upper_r ?? 0) > 0) {
+      drawXMark(snapshot.xpoint_upper_r, snapshot.xpoint_upper_z)
     }
 
     // --- Labels ---

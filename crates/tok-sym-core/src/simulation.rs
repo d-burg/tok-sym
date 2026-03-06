@@ -39,6 +39,10 @@ pub struct DischargeProgram {
     pub neon_puff: Vec<WaveformPoint>,
     /// Total discharge duration (s)
     pub duration: f64,
+    /// Magnetic configuration override ("LowerSingleNull", "UpperSingleNull",
+    /// "DoubleNull").  When absent, falls back to the device default.
+    #[serde(default)]
+    pub config_override: Option<String>,
 }
 
 impl DischargeProgram {
@@ -154,6 +158,7 @@ impl DischargeProgram {
             ],
             neon_puff: vec![(0.0, 0.0), (duration, 0.0)],
             duration,
+            config_override: None,
         }
     }
 
@@ -206,6 +211,7 @@ impl DischargeProgram {
             ],
             neon_puff: vec![(0.0, 0.0), (duration, 0.0)],
             duration,
+            config_override: None,
         }
     }
 
@@ -267,6 +273,7 @@ impl DischargeProgram {
             ],
             neon_puff: vec![(0.0, 0.0), (duration, 0.0)],
             duration,
+            config_override: None,
         }
     }
 }
@@ -332,6 +339,9 @@ pub struct SimulationSnapshot {
     pub axis_z: f64,
     pub xpoint_r: f64,
     pub xpoint_z: f64,
+    pub xpoint_upper_r: f64,
+    pub xpoint_upper_z: f64,
+    pub magnetic_config: String,
     pub is_limited: bool,
 
     // Status
@@ -594,6 +604,13 @@ impl Simulation {
 
         let config = if prog.delta < 0.1 {
             MagneticConfig::Limited
+        } else if let Some(ref cfg_str) = self.program.config_override {
+            match cfg_str.as_str() {
+                "DoubleNull" => MagneticConfig::DoubleNull,
+                "UpperSingleNull" => MagneticConfig::UpperSingleNull,
+                "LowerSingleNull" => MagneticConfig::LowerSingleNull,
+                _ => self.device.config,
+            }
         } else {
             self.device.config
         };
@@ -606,6 +623,10 @@ impl Simulation {
         };
         let epsilon = if config == MagneticConfig::Limited {
             self.device.epsilon() * (0.35 + 0.65 * ip_frac)
+        } else if config == MagneticConfig::DoubleNull {
+            // DN plasma is smaller to fit within both upper and lower
+            // divertor shelves of the limiter geometry.
+            self.device.epsilon() * 0.88
         } else {
             self.device.epsilon()
         };
@@ -644,13 +665,16 @@ impl Simulation {
             let a = epsilon * self.device.r0; // physical minor radius
             let lcfs_points = sample_lcfs(self.device.r0, a, prog.kappa, delta_eff, 24);
 
-            // X-point Z for bulk/leg discrimination
-            let (_, z_xpt) = self.equilibrium.x_point_physical();
+            // X-point(s) for bulk/leg discrimination
+            let (xp_lower, xp_upper) = self.equilibrium.x_points_physical();
 
             for &(r, z, _theta) in &lcfs_points {
-                // Skip divertor leg region: points near or below X-point
-                if z < z_xpt + 0.05 {
-                    continue;
+                // Skip divertor leg regions near X-points
+                if let Some((_, z_lo)) = xp_lower {
+                    if z < z_lo + 0.05 { continue; }
+                }
+                if let Some((_, z_up)) = xp_upper {
+                    if z > z_up - 0.05 { continue; }
                 }
                 // Check if this LCFS point is outside the wall
                 if !point_in_polygon(r, z, &self.device.wall_outline) {
@@ -705,21 +729,14 @@ impl Simulation {
         let is_limited = self.equilibrium.shape.config == MagneticConfig::Limited;
 
         // Draw separatrix in both limited and diverted phases — in limited config
-        // it represents the LCFS touching the wall, clipped by the frontend canvas
+        // it represents the LCFS touching the wall, clipped by the frontend canvas.
+        // Uses extract_separatrix() which preserves all significant chains including
+        // divertor legs for double-null configurations.
+        // Pass the device-level grid bounds so the extraction covers the full divertor
+        // region even when the equilibrium ε is reduced (e.g. DN uses 0.88×ε).
+        let sep_bounds = Some((grid_r_min, grid_r_max, grid_z_min, grid_z_max));
         let mut separatrix = if self.actual_ip > 0.1 {
-            let grid = self.equilibrium.psi_grid(
-                grid_r_min, grid_r_max, grid_z_min, grid_z_max,
-                self.eq_nr, self.eq_nz,
-            );
-            let contours = contour::extract_contours(
-                &grid, self.eq_nr, self.eq_nz,
-                grid_r_min, grid_r_max, grid_z_min, grid_z_max,
-                &[0.0],
-            );
-            contours.into_iter().next().unwrap_or(Contour {
-                level: 0.0,
-                points: vec![],
-            })
+            contour::extract_separatrix(&self.equilibrium, self.eq_nr, self.eq_nz, sep_bounds)
         } else {
             Contour {
                 level: 0.0,
@@ -733,6 +750,16 @@ impl Simulation {
         } else {
             self.equilibrium.x_point_physical()
         };
+
+        // Dual x-point support
+        let (_xp_lower, xp_upper) = if is_limited {
+            (None, None)
+        } else {
+            self.equilibrium.x_points_physical()
+        };
+        let (xpoint_upper_r, xpoint_upper_z) = xp_upper.unwrap_or((0.0, 0.0));
+
+        let magnetic_config = format!("{:?}", self.equilibrium.shape.config);
 
         // During limited phase, shift plasma inboard so inboard edge touches limiter
         if is_limited && self.actual_ip > 0.1 {
@@ -831,6 +858,9 @@ impl Simulation {
             axis_z,
             xpoint_r,
             xpoint_z,
+            xpoint_upper_r,
+            xpoint_upper_z,
+            magnetic_config,
             is_limited,
             status: self.status,
         }
