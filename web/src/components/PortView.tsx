@@ -469,6 +469,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
   const wallCacheRef = useRef<{
     farCanvas: HTMLCanvasElement   // inboard wall — drawn BEHIND plasma
     nearCanvas: HTMLCanvasElement  // outboard wall + port — drawn IN FRONT of plasma
+    csClipPath: Path2D | null      // center stack silhouette clip (evenodd: renders OUTSIDE silhouette)
     w: number; h: number; key: string
   } | null>(null)
   const strikeGlowRef = useRef(0)       // current fade level 0–1
@@ -559,7 +560,90 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           drawPortCylinder(nearCtx, cam, portCfg)
         }
 
-        wallCacheRef.current = { farCanvas, nearCanvas, w: canvas.width, h: canvas.height, key: wallKey }
+        // ── Center stack silhouette for glow occlusion ──────────────────
+        // Compute the tangent-based silhouette of the inboard wall.
+        // For each inboard wall point at (R_w, Z_w), the tangent angle from the
+        // camera at camR is φ_t = arccos(R_w / camR). Projecting the tangent
+        // points to screen space gives left/right silhouette edges. This polygon,
+        // used with evenodd fill rule (outer rect + inner silhouette), clips glow
+        // to ONLY the region outside the center stack — robust to any limiter
+        // geometry including complex divertor channels, because it uses the actual
+        // contour R at each Z height.
+        let csClipPath: Path2D | null = null
+        const camR_cs = portCfg.camR
+
+        // Threshold: include all points inboard of the magnetic axis.
+        // Use deviceR0 (major radius) if available, otherwise lookR as proxy.
+        const ibThreshold = (deviceR0 ?? portCfg.lookR * 1.5) * 1.05
+
+        // Extract the contiguous inboard section of the limiter contour.
+        // Walk the closed loop to find where R drops below threshold.
+        const nWallPts = resolvedWall.length
+        let ibStartIdx = -1
+        for (let i = 0; i < nWallPts; i++) {
+          const iPrev = (i - 1 + nWallPts) % nWallPts
+          if (resolvedWall[iPrev][0] >= ibThreshold && resolvedWall[i][0] < ibThreshold) {
+            ibStartIdx = i
+            break
+          }
+        }
+
+        // Collect inboard points in contour order
+        const ibProfile: [number, number][] = []
+        if (ibStartIdx >= 0) {
+          for (let i = 0; i < nWallPts; i++) {
+            const idx = (ibStartIdx + i) % nWallPts
+            if (resolvedWall[idx][0] < ibThreshold) {
+              ibProfile.push(resolvedWall[idx])
+            } else {
+              break
+            }
+          }
+        }
+
+        if (ibProfile.length >= 3) {
+          // Ensure top-to-bottom order (descending Z)
+          if (ibProfile[0][1] < ibProfile[ibProfile.length - 1][1]) {
+            ibProfile.reverse()
+          }
+
+          const leftEdge: { sx: number; sy: number }[] = []
+          const rightEdge: { sx: number; sy: number }[] = []
+
+          for (const [Rw, Zw] of ibProfile) {
+            const ratio = Math.min(Rw / camR_cs, 0.9999)
+            const cosPhiT = ratio
+            const sinPhiT = Math.sqrt(1 - ratio * ratio)
+
+            // Left tangent point (positive toroidal angle)
+            const lp = cam.project({ x: Rw * cosPhiT, y: Rw * sinPhiT, z: Zw })
+            if (lp) leftEdge.push({ sx: lp.sx, sy: lp.sy })
+
+            // Right tangent point (negative toroidal angle)
+            const rp = cam.project({ x: Rw * cosPhiT, y: -Rw * sinPhiT, z: Zw })
+            if (rp) rightEdge.push({ sx: rp.sx, sy: rp.sy })
+          }
+
+          if (leftEdge.length >= 3 && rightEdge.length >= 3) {
+            csClipPath = new Path2D()
+            // Outer boundary: full canvas (all pixels initially included)
+            csClipPath.rect(0, 0, W, H)
+            // Inner boundary: center stack silhouette (excluded by evenodd rule)
+            csClipPath.moveTo(leftEdge[0].sx, leftEdge[0].sy)
+            for (let i = 1; i < leftEdge.length; i++) {
+              csClipPath.lineTo(leftEdge[i].sx, leftEdge[i].sy)
+            }
+            // Connect left bottom → right bottom
+            csClipPath.lineTo(rightEdge[rightEdge.length - 1].sx, rightEdge[rightEdge.length - 1].sy)
+            // Right edge bottom-to-top
+            for (let i = rightEdge.length - 2; i >= 0; i--) {
+              csClipPath.lineTo(rightEdge[i].sx, rightEdge[i].sy)
+            }
+            csClipPath.closePath()
+          }
+        }
+
+        wallCacheRef.current = { farCanvas, nearCanvas, csClipPath, w: canvas.width, h: canvas.height, key: wallKey }
       }
 
       // Draw far wall immediately (behind plasma)
@@ -715,6 +799,22 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       cosPhis[s] = Math.cos(phis[s])
       sinPhis[s] = Math.sin(phis[s])
     }
+
+    // Glow phi: full ±π range so strike glow wraps all the way around the vessel.
+    // 200 slices across full ±π keeps ~90 slices in the visible front region,
+    // restoring additive brightness comparable to the original 140-in-±80° setup.
+    const nGlowSlices = 200
+    const glowPhis: number[] = []
+    for (let i = 0; i < nGlowSlices; i++) {
+      glowPhis.push(portCfg.phiMin + (portCfg.phiMax - portCfg.phiMin) * (i / (nGlowSlices - 1)))
+    }
+    const cosGlowPhis = new Float64Array(nGlowSlices)
+    const sinGlowPhis = new Float64Array(nGlowSlices)
+    for (let s = 0; s < nGlowSlices; s++) {
+      cosGlowPhis[s] = Math.cos(glowPhis[s])
+      sinGlowPhis[s] = Math.sin(glowPhis[s])
+    }
+
     // Reusable Vec3 for projections — avoids allocating ~70k temporary
     // objects per frame that toroidal() would otherwise create.
     const tmpV: Vec3 = { x: 0, y: 0, z: 0 }
@@ -1097,6 +1197,39 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       }
     }
 
+    // Pre-project strike points at glow phi range (full ±π) for glow that
+    // wraps all the way around the vessel, not just the plasma phi range.
+    const strikeGlowXY = new Float64Array(nStrike * nGlowSlices * 2)
+    for (let sp = 0; sp < nStrike; sp++) {
+      const spR = strikePointRZ[sp][0], spZ = strikePointRZ[sp][1]
+      for (let s = 0; s < nGlowSlices; s++) {
+        const off = (sp * nGlowSlices + s) * 2
+        tmpV.x = spR * cosGlowPhis[s]; tmpV.y = spR * sinGlowPhis[s]; tmpV.z = spZ
+        const p2d = cam.project(tmpV)
+        if (p2d) { strikeGlowXY[off] = p2d.sx; strikeGlowXY[off + 1] = p2d.sy }
+        else { strikeGlowXY[off] = NaN; strikeGlowXY[off + 1] = NaN }
+      }
+    }
+
+    // Glow slice depths for depthFrac (controls glow size/brightness per slice)
+    const glowSliceDepths: number[] = []
+    const glowAxisR = portCfg.lookR
+    for (let s = 0; s < nGlowSlices; s++) {
+      tmpV.x = glowAxisR * cosGlowPhis[s]
+      tmpV.y = glowAxisR * sinGlowPhis[s]
+      tmpV.z = 0
+      const p2d = cam.project(tmpV)
+      glowSliceDepths.push(p2d ? p2d.depth : 1e6)
+    }
+    let glowMinDepth = Infinity, glowMaxDepth = -Infinity
+    for (const d of glowSliceDepths) {
+      if (d < 1e5) {
+        if (d < glowMinDepth) glowMinDepth = d
+        if (d > glowMaxDepth) glowMaxDepth = d
+      }
+    }
+    const glowDepthRange = glowMaxDepth - glowMinDepth + 0.01
+
     // ── Pre-render glow sprites for strike point rendering ──
     // A single 32×32 radial gradient canvas stamped with drawImage()+globalAlpha
     // replaces 560 createRadialGradient()+addColorStop() calls per frame.
@@ -1190,12 +1323,20 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       }
     }
 
+    // Center stack silhouette clip: prevents glow from shining through the
+    // center stack.  Computed once in the wall cache from tangent-based
+    // projection of the inboard wall profile.  The evenodd Path2D clips
+    // rendering to OUTSIDE the center stack silhouette.
+    const csClip = wallCacheRef.current?.csClipPath ?? null
+
     // ── Step 4: Strike point glow on divertor plates ──
     // Localized, bright glow at the strike-point locations.  Should be
     // comparable in width to the divertor legs — no wider.
     // SOL-like turbulent fluctuations: fast position jitter + brightness flicker
     // simulates the filamentary, turbulent scrape-off layer seen in real tokamak cameras.
     if (strikePointRZ.length > 0 && strikeFade > 0.001) {
+      // Apply center stack occlusion clip
+      if (csClip) { ctx.save(); ctx.clip(csClip, 'evenodd') }
       const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
       const strikeAlpha = 0.35 * powerScale * strikeFade  // decoupled from opacityScale for bright strikes
 
@@ -1211,13 +1352,13 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
       for (let sp = 0; sp < nStrike; sp++) {
-        for (const s of sliceOrder) {
-          const off = (sp * nSlicesPlasma + s) * 2
-          const sx = strikeXY[off]
+        for (let s = 0; s < nGlowSlices; s++) {
+          const off = (sp * nGlowSlices + s) * 2
+          const sx = strikeGlowXY[off]
           if (sx !== sx) continue  // NaN = off-screen
-          const sy = strikeXY[off + 1]
+          const sy = strikeGlowXY[off + 1]
 
-          const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
+          const depthFrac = 1 - (glowSliceDepths[s] - glowMinDepth) / glowDepthRange
 
           // SOL fluctuations: per-slice position jitter + brightness flicker
           // Changes rapidly (~60-120 Hz) to simulate turbulent filaments
@@ -1237,6 +1378,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         }
       }
       ctx.restore()
+      if (csClip) ctx.restore()  // remove center stack clip
     }
 
     // ── Step 4a: Draw NEAR wall on top of plasma + glow ──
@@ -1252,6 +1394,8 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // tiles (both far and near), producing the red reflected glow from
     // divertor emission onto nearby wall surfaces.
     if (strikePointRZ.length > 0 && strikeFade > 0.001) {
+      // Apply center stack occlusion clip for wall illumination + floor glow
+      if (csClip) { ctx.save(); ctx.clip(csClip, 'evenodd') }
       const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
       const illumAlpha = 0.18 * powerScale * strikeFade
 
@@ -1268,13 +1412,13 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
         for (let sp = 0; sp < nStrike; sp++) {
-          for (const s of sliceOrder) {
-            const off = (sp * nSlicesPlasma + s) * 2
-            const sx = strikeXY[off]
+          for (let s = 0; s < nGlowSlices; s++) {
+            const off = (sp * nGlowSlices + s) * 2
+            const sx = strikeGlowXY[off]
             if (sx !== sx) continue  // NaN = off-screen
-            const sy = strikeXY[off + 1]
+            const sy = strikeGlowXY[off + 1]
 
-            const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
+            const depthFrac = 1 - (glowSliceDepths[s] - glowMinDepth) / glowDepthRange
 
             // Correlated SOL fluctuations: position + brightness jitter
             const posJitter = (solHash4b(tSeed4b + s * 137 + sp * 9371) - 0.5) * 3.5
@@ -1304,11 +1448,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
             const t = fi / (FLOOR_INTERP + 1)
             const iR = r0 + (r1 - r0) * t
             const iZ = z0 + (z1 - z0) * t
-            for (const s of sliceOrder) {
-              tmpV.x = iR * cosPhis[s]; tmpV.y = iR * sinPhis[s]; tmpV.z = iZ
+            for (let s = 0; s < nGlowSlices; s++) {
+              tmpV.x = iR * cosGlowPhis[s]; tmpV.y = iR * sinGlowPhis[s]; tmpV.z = iZ
               const p2d = cam.project(tmpV)
               if (!p2d) continue
-              const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
+              const depthFrac = 1 - (glowSliceDepths[s] - glowMinDepth) / glowDepthRange
               const gAlpha = illumAlpha * 0.6 * (0.3 + depthFrac * 0.7)
               if (gAlpha < 0.001) continue
               const glowR = 10 + depthFrac * 14
@@ -1320,7 +1464,13 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         }
         ctx.restore()
       }
+      if (csClip) ctx.restore()  // remove center stack clip
     }
+
+    // Step 4c removed — center stack occlusion now handled by silhouette clip
+    // mask (csClipPath) applied during Steps 4 and 4b.  This is more robust
+    // than re-drawing the far wall canvas because it handles complex divertor
+    // channel geometry and doesn't sacrifice wall illumination on visible tiles.
 
     // ── Step 5: ELM flash overlay ──
     if (elmActive && !disrupted) {
@@ -1456,7 +1606,7 @@ function drawLimiterWall(
   interface WallQuad {
     corners: (ScreenPt | null)[]
     depth: number
-    isGridEdge: boolean
+    gridProximity: number  // 0 = on grid line (darkest), 1 = center of tile (brightest)
     region: WallRegion
     qZ: number           // Z position for antenna louver pattern
     viewDot: number       // view angle for Fresnel-like specular
@@ -1590,11 +1740,24 @@ function drawLimiterWall(
         tGrid = cfg.tileGridSpacing.toroidal
       }
 
-      // Grid edge detection with region-appropriate spacing
-      const crossesToroidalGrid = tGrid > 0 &&
-        Math.floor(toroidalArc0 / tGrid) !== Math.floor(toroidalArc1 / tGrid)
-      const crossesPoloidalGrid = pGrid > 0 &&
-        Math.floor(poloidalArc[j] / pGrid) !== Math.floor(poloidalArc[jn < nPts ? jn : 0] / pGrid)
+      // Distance-based grid proximity: prevents moiré when quad size > tile size.
+      // Computes how close the quad CENTER is to the nearest grid line.
+      const tCenter = (toroidalArc0 + toroidalArc1) * 0.5
+      const pCenter = (poloidalArc[j] + poloidalArc[jn < nPts ? jn : 0]) * 0.5
+
+      // Fractional position within tile cell (0..1), handling negative toroidal arcs
+      const tCellPos = tGrid > 0 ? (((tCenter % tGrid) + tGrid) % tGrid) / tGrid : 0.5
+      const pCellPos = pGrid > 0 ? (((pCenter % pGrid) + pGrid) % pGrid) / pGrid : 0.5
+
+      // Distance from nearest grid line: 0 = on line, 0.5 = center of tile
+      const tDist = Math.min(tCellPos, 1 - tCellPos)
+      const pDist = Math.min(pCellPos, 1 - pCellPos)
+
+      // Smooth border: ramp from 0 (on grid) to 1 (inside tile) over borderWidth fraction
+      const borderWidth = 0.12  // 12% of tile width → narrow dark border
+      const tBorder = tGrid > 0 ? Math.min(tDist / borderWidth, 1.0) : 1.0
+      const pBorder = pGrid > 0 ? Math.min(pDist / borderWidth, 1.0) : 1.0
+      const gridProximity = tBorder * pBorder
 
       // ── View angle for Fresnel-like specular ──
       const inLen = Math.sqrt(inward.x * inward.x + inward.y * inward.y + inward.z * inward.z)
@@ -1603,14 +1766,15 @@ function drawLimiterWall(
         ? dot(inward, viewDir) / (inLen * vLen) : 0.5
 
       // ── Per-tile deterministic hash for brightness variation ──
-      const cellP = pGrid > 0 ? Math.floor(poloidalArc[j] / pGrid) : j
-      const cellT = tGrid > 0 ? Math.floor(toroidalArc0 / tGrid) : s
+      // Use quad center for consistent hashing even when quad spans multiple tiles
+      const cellP = pGrid > 0 ? Math.floor(pCenter / pGrid) : j
+      const cellT = tGrid > 0 ? Math.floor(tCenter / tGrid) : s
       const tileHash = (((cellP * 7919 + cellT * 104729) & 0xFFFF) / 65536)
 
       quads.push({
         corners: [sa, sb, sc, sd],
         depth: avgDepth,
-        isGridEdge: crossesToroidalGrid || crossesPoloidalGrid,
+        gridProximity,
         region,
         qZ: qcz,
         viewDot,
@@ -1693,7 +1857,7 @@ function drawLimiterWall(
         bandMod = (bandIdx & 1) === 0 ? 1.12 : 0.88  // subtle alternating bright/dark columns
         gridDim = 1.0  // band alternation IS the visual pattern — no additional grid lines
       } else {
-        gridDim = q.isGridEdge ? (1 - cfg.tileGridDarken) : 1.0
+        gridDim = 1.0 - cfg.tileGridDarken * (1.0 - q.gridProximity)
       }
 
       const mod = depthMod * gridDim * tileVariation * fresnel * bandMod
