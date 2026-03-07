@@ -106,7 +106,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     fov: 80,              // wide-angle ~18mm — fits wall vertically
     tileColor: [28, 28, 30],       // dark matte carbon
     tileGridSpacing: { poloidal: 0.10, toroidal: 0.08 },    // outboard wall default
-    tileGridDarken: 0.30,
+    tileGridDarken: 0.18,
     phiMin: -Math.PI,
     phiMax: Math.PI,
     plasmaPhiMin: -1.40,
@@ -128,7 +128,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       { r: 2.35, zMin: -0.28, zMax: 0.28, phiMin: 0.55, phiMax: 0.72 },   // ICRH antenna
       { r: 2.35, zMin: -0.12, zMax: 0.12, phiMin: -0.60, phiMax: -0.48 },  // ECH launcher
     ],
-    fresnelStrength: 0.35,
+    fresnelStrength: 0.15,
   },
   iter: {
     portR: 8.30,
@@ -145,7 +145,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     fov: 80,              // wide-angle ~18mm — fits wall vertically
     tileColor: [38, 36, 32],       // boronized tungsten
     tileGridSpacing: { poloidal: 0.15, toroidal: 0.12 },
-    tileGridDarken: 0.25,
+    tileGridDarken: 0.15,
     phiMin: -Math.PI,
     phiMax: Math.PI,
     plasmaPhiMin: -1.40,
@@ -165,7 +165,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     antennae: [
       { r: 8.30, zMin: -0.8, zMax: 0.8, phiMin: 0.35, phiMax: 0.55 },
     ],
-    fresnelStrength: 0.55,
+    fresnelStrength: 0.20,
   },
   sparc: {
     portR: 2.10,
@@ -182,7 +182,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     fov: 80,              // wide-angle ~18mm — fits wall vertically
     tileColor: [36, 34, 30],       // tungsten tiles
     tileGridSpacing: { poloidal: 0.08, toroidal: 0.07 },
-    tileGridDarken: 0.28,
+    tileGridDarken: 0.16,
     phiMin: -Math.PI,
     phiMax: Math.PI,
     plasmaPhiMin: -1.40,
@@ -198,7 +198,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       { r: 2.10, z: 0.30, phi: 0.15, radius: 0.06 },
       { r: 2.10, z: -0.25, phi: -0.20, radius: 0.05 },
     ],
-    fresnelStrength: 0.45,
+    fresnelStrength: 0.18,
   },
   jet: {
     portR: 3.80,
@@ -215,7 +215,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     fov: 80,              // wide-angle ~18mm — fits wall vertically
     tileColor: [32, 30, 28],       // carbon/Be wall
     tileGridSpacing: { poloidal: 0.12, toroidal: 0.10 },
-    tileGridDarken: 0.26,
+    tileGridDarken: 0.15,
     phiMin: -Math.PI,
     phiMax: Math.PI,
     plasmaPhiMin: -1.40,
@@ -235,7 +235,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     antennae: [
       { r: 3.80, zMin: -0.40, zMax: 0.40, phiMin: 0.40, phiMax: 0.58 },
     ],
-    fresnelStrength: 0.65,
+    fresnelStrength: 0.25,
     inboardStyle: 'bands',
     bandWidth: 0.06,
     divertorRegion: {
@@ -1193,9 +1193,20 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // ── Step 4: Strike point glow on divertor plates ──
     // Localized, bright glow at the strike-point locations.  Should be
     // comparable in width to the divertor legs — no wider.
+    // SOL-like turbulent fluctuations: fast position jitter + brightness flicker
+    // simulates the filamentary, turbulent scrape-off layer seen in real tokamak cameras.
     if (strikePointRZ.length > 0 && strikeFade > 0.001) {
       const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
       const strikeAlpha = 0.35 * powerScale * strikeFade  // decoupled from opacityScale for bright strikes
+
+      // SOL turbulence: fast pseudo-random jitter seeded by time
+      const tNow = performance.now()
+      // Quick hash function for turbulent variation per slice/strike
+      const solHash = (seed: number) => {
+        let h = (seed * 2654435761) >>> 0
+        h = ((h ^ (h >>> 16)) * 0x45d9f3b) >>> 0
+        return (h & 0xFFFF) / 65536  // 0..1
+      }
 
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
@@ -1207,7 +1218,14 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           const sy = strikeXY[off + 1]
 
           const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-          const gAlpha = strikeAlpha * (0.85 + depthFrac * 0.15)
+
+          // SOL fluctuations: per-slice position jitter + brightness flicker
+          // Changes rapidly (~60-120 Hz) to simulate turbulent filaments
+          const tSeed = Math.floor(tNow * 0.12) // ~120 Hz update rate
+          const posJitter = (solHash(tSeed + s * 137 + sp * 9371) - 0.5) * 3.5  // ±1.75px lateral wobble
+          const brightFlicker = 0.75 + solHash(tSeed * 3 + s * 241 + sp * 6173) * 0.50  // 75–125% brightness
+
+          const gAlpha = strikeAlpha * (0.85 + depthFrac * 0.15) * brightFlicker
           if (gAlpha < 0.001) continue
 
           // Broad deep red strike glow
@@ -1215,7 +1233,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           // Sprite was rendered with alphas normalized by /2.0, so multiply back
           ctx.globalAlpha = gAlpha * 2.0
           ctx.drawImage(strikeGlowSprite, 0, 0, 32, 32,
-            sx - glowR, sy - glowR, glowR * 2, glowR * 2)
+            sx - glowR + posJitter, sy - glowR, glowR * 2, glowR * 2)
         }
       }
       ctx.restore()
@@ -1238,6 +1256,15 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       const illumAlpha = 0.18 * powerScale * strikeFade
 
       if (illumAlpha > 0.001) {
+        // SOL turbulence for wall illumination (matches Step 4 fluctuations)
+        const tNow4b = performance.now()
+        const solHash4b = (seed: number) => {
+          let h = (seed * 2654435761) >>> 0
+          h = ((h ^ (h >>> 16)) * 0x45d9f3b) >>> 0
+          return (h & 0xFFFF) / 65536
+        }
+        const tSeed4b = Math.floor(tNow4b * 0.12)  // ~120 Hz
+
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
         for (let sp = 0; sp < nStrike; sp++) {
@@ -1248,13 +1275,18 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
             const sy = strikeXY[off + 1]
 
             const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-            const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6)
+
+            // Correlated SOL fluctuations: position + brightness jitter
+            const posJitter = (solHash4b(tSeed4b + s * 137 + sp * 9371) - 0.5) * 3.5
+            const brightFlicker = 0.80 + solHash4b(tSeed4b * 3 + s * 241 + sp * 6173) * 0.40
+
+            const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6) * brightFlicker
             if (gAlpha < 0.001) continue
 
             const glowR = 14 + depthFrac * 18
             ctx.globalAlpha = gAlpha
             ctx.drawImage(wallGlowSprite, 0, 0, 32, 32,
-              sx - glowR, sy - glowR, glowR * 2, glowR * 2)
+              sx - glowR + posJitter, sy - glowR, glowR * 2, glowR * 2)
           }
         }
         ctx.restore()
@@ -1430,6 +1462,7 @@ function drawLimiterWall(
     viewDot: number       // view angle for Fresnel-like specular
     tileHash: number      // per-tile brightness variation (0–1)
     toroidalArc: number   // toroidal arc position for band rendering
+    phi: number           // raw toroidal angle (for R-independent band alignment)
   }
   const quads: WallQuad[] = []
 
@@ -1583,6 +1616,7 @@ function drawLimiterWall(
         viewDot,
         tileHash,
         toroidalArc: toroidalArc0,
+        phi: phis[s],
       })
     }
   }
@@ -1634,8 +1668,8 @@ function drawLimiterWall(
       // Normal tile regions (inboard, outboard, limiter, divertor)
       const depthMod = 0.45 + df * 0.55
 
-      // Per-device Fresnel strength + wider per-tile brightness variation
-      const tileVariation = 0.88 + q.tileHash * 0.24  // ±12% per-tile brightness
+      // Per-tile brightness variation: very subtle for uniform tile appearance
+      const tileVariation = 0.97 + q.tileHash * 0.06  // ±3% — nearly uniform tiles
       const fresnelStr = cfg.fresnelStrength ?? 0.25
       const fresnel = 1.0 + (1.0 - q.viewDot) * fresnelStr
 
@@ -1646,12 +1680,17 @@ function drawLimiterWall(
       }
 
       // JET-style alternating vertical bands on inboard wall
+      // Uses phi (toroidal angle) instead of toroidal arc so that bands
+      // align as pure vertical stripes regardless of local R variation.
       let bandMod = 1.0
       let gridDim: number
       if (q.region === WallRegion.Inboard && cfg.inboardStyle === 'bands') {
         const bw = cfg.bandWidth ?? 0.08
-        const bandIdx = Math.floor(q.toroidalArc / bw)
-        bandMod = (bandIdx & 1) === 0 ? 1.18 : 0.82  // alternating bright/dark columns
+        // Convert metric band width to angular width at typical inboard wall R
+        const inboardR = axisR * 0.6
+        const angularBw = bw / inboardR
+        const bandIdx = Math.floor(q.phi / angularBw)
+        bandMod = (bandIdx & 1) === 0 ? 1.12 : 0.88  // subtle alternating bright/dark columns
         gridDim = 1.0  // band alternation IS the visual pattern — no additional grid lines
       } else {
         gridDim = q.isGridEdge ? (1 - cfg.tileGridDarken) : 1.0

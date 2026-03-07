@@ -402,7 +402,7 @@ impl TransportModel {
                     self.elm_type = 1;
                     self.elm_cooldown = 0.010;
                     let elm_fraction = (0.05 + 0.08 * power_excess.min(1.0))
-                        * (0.9 + 0.2 * rng_amp); // ±10% amplitude variation
+                        * (0.97 + 0.06 * rng_amp); // ±3% amplitude variation — uniform ELM crashes
                     self.elm_energy_loss = elm_fraction * self.w_th;
                     self.elm_ped_crash_frac = elm_fraction * 2.5; // amplified for pedestal
                     self.w_th *= 1.0 - elm_fraction;
