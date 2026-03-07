@@ -46,6 +46,17 @@ interface PortConfig {
   extraPorts?: { r: number; z: number; phi: number; radius: number }[]
   // Antenna structures on outboard wall (louvered Faraday screens)
   antennae?: { r: number; zMin: number; zMax: number; phiMin: number; phiMax: number }[]
+  // Fresnel edge brightening strength (0.25 = default subtle, 0.65 = strong metallic sheen)
+  fresnelStrength?: number
+  // JET-style alternating vertical bands on inboard wall
+  inboardStyle?: 'tiles' | 'bands'
+  bandWidth?: number  // toroidal width of each band (m) — default 0.08
+  // Divertor region: darker tiles in lower vessel
+  divertorRegion?: {
+    zThreshold: number                    // Z below this (negative) = divertor
+    tileColor: [number, number, number]   // darker tile color
+    gridSpacing: { poloidal: number; toroidal: number }
+  }
 }
 
 function defaultPortConfig(r0: number, a: number): PortConfig {
@@ -117,6 +128,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       { r: 2.35, zMin: -0.28, zMax: 0.28, phiMin: 0.55, phiMax: 0.72 },   // ICRH antenna
       { r: 2.35, zMin: -0.12, zMax: 0.12, phiMin: -0.60, phiMax: -0.48 },  // ECH launcher
     ],
+    fresnelStrength: 0.35,
   },
   iter: {
     portR: 8.30,
@@ -153,6 +165,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     antennae: [
       { r: 8.30, zMin: -0.8, zMax: 0.8, phiMin: 0.35, phiMax: 0.55 },
     ],
+    fresnelStrength: 0.55,
   },
   sparc: {
     portR: 2.10,
@@ -185,6 +198,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       { r: 2.10, z: 0.30, phi: 0.15, radius: 0.06 },
       { r: 2.10, z: -0.25, phi: -0.20, radius: 0.05 },
     ],
+    fresnelStrength: 0.45,
   },
   jet: {
     portR: 3.80,
@@ -221,6 +235,14 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     antennae: [
       { r: 3.80, zMin: -0.40, zMax: 0.40, phiMin: 0.40, phiMax: 0.58 },
     ],
+    fresnelStrength: 0.65,
+    inboardStyle: 'bands',
+    bandWidth: 0.06,
+    divertorRegion: {
+      zThreshold: -1.0,
+      tileColor: [18, 16, 14],
+      gridSpacing: { poloidal: 0.08, toroidal: 0.08 },
+    },
   },
 }
 
@@ -1168,75 +1190,6 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       }
     }
 
-    // ── Step 3b: Wall illumination from strike points ──
-    // When strike points are active, nearby wall tiles glow with warm
-    // red light — visible mostly on the divertor region.
-
-    // Wall illumination: localized warm glow on divertor tiles near strike points.
-    // Small radius — should not extend much beyond the divertor leg width.
-    // Brighter than before, but tightly confined to the plate region.
-    if (strikePointRZ.length > 0 && strikeFade > 0.001) {
-      const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
-      const illumAlpha = 0.18 * powerScale * strikeFade  // brighter for deep red glow
-
-      if (illumAlpha > 0.001) {
-        ctx.save()
-        ctx.globalCompositeOperation = 'lighter'
-        for (let sp = 0; sp < nStrike; sp++) {
-          for (const s of sliceOrder) {
-            const off = (sp * nSlicesPlasma + s) * 2
-            const sx = strikeXY[off]
-            if (sx !== sx) continue  // NaN = off-screen
-            const sy = strikeXY[off + 1]
-
-            const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-            const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6)
-            if (gAlpha < 0.001) continue
-
-            // Broad glow radius for deep red wall illumination
-            const glowR = 14 + depthFrac * 18
-            ctx.globalAlpha = gAlpha
-            ctx.drawImage(wallGlowSprite, 0, 0, 32, 32,
-              sx - glowR, sy - glowR, glowR * 2, glowR * 2)
-          }
-        }
-        ctx.restore()
-      }
-
-      // ── Step 3c: Extended divertor floor glow ──
-      // Interpolate additional glow sources between inner & outer strike points
-      // so the emission looks like it comes from the entire divertor plate.
-      if (nStrike >= 2 && strikeFade > 0.01) {
-        const FLOOR_INTERP = 4  // number of interpolated points between strike pairs
-        ctx.save()
-        ctx.globalCompositeOperation = 'lighter'
-        // For lower X-point: inner strike = index 0, outer strike = index 1
-        // For upper X-point (if present): inner = index 2, outer = index 3
-        for (let pair = 0; pair < nStrike - 1; pair += 2) {
-          const r0 = strikePointRZ[pair][0], z0 = strikePointRZ[pair][1]
-          const r1 = strikePointRZ[pair + 1][0], z1 = strikePointRZ[pair + 1][1]
-          for (let fi = 1; fi <= FLOOR_INTERP; fi++) {
-            const t = fi / (FLOOR_INTERP + 1)
-            const iR = r0 + (r1 - r0) * t
-            const iZ = z0 + (z1 - z0) * t
-            for (const s of sliceOrder) {
-              tmpV.x = iR * cosPhis[s]; tmpV.y = iR * sinPhis[s]; tmpV.z = iZ
-              const p2d = cam.project(tmpV)
-              if (!p2d) continue
-              const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
-              const gAlpha = illumAlpha * 0.6 * (0.3 + depthFrac * 0.7)  // dimmer than actual strike glow
-              if (gAlpha < 0.001) continue
-              const glowR = 10 + depthFrac * 14
-              ctx.globalAlpha = gAlpha
-              ctx.drawImage(wallGlowSprite, 0, 0, 32, 32,
-                p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
-            }
-          }
-        }
-        ctx.restore()
-      }
-    }
-
     // ── Step 4: Strike point glow on divertor plates ──
     // Localized, bright glow at the strike-point locations.  Should be
     // comparable in width to the divertor legs — no wider.
@@ -1274,6 +1227,67 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     // at the port plug edges (prevents glow arc on widescreen monitors).
     if (wallCacheRef.current) {
       ctx.drawImage(wallCacheRef.current.nearCanvas, 0, 0, canvas.width, canvas.height, 0, 0, W, H)
+    }
+
+    // ── Step 4b: Wall illumination from strike points ──
+    // Drawn AFTER the near wall so the additive glow is visible on ALL wall
+    // tiles (both far and near), producing the red reflected glow from
+    // divertor emission onto nearby wall surfaces.
+    if (strikePointRZ.length > 0 && strikeFade > 0.001) {
+      const powerScale = (deviceId && DEVICE_POWER_SCALE[deviceId]) ?? DEFAULT_POWER_SCALE
+      const illumAlpha = 0.18 * powerScale * strikeFade
+
+      if (illumAlpha > 0.001) {
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        for (let sp = 0; sp < nStrike; sp++) {
+          for (const s of sliceOrder) {
+            const off = (sp * nSlicesPlasma + s) * 2
+            const sx = strikeXY[off]
+            if (sx !== sx) continue  // NaN = off-screen
+            const sy = strikeXY[off + 1]
+
+            const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
+            const gAlpha = illumAlpha * (0.4 + depthFrac * 0.6)
+            if (gAlpha < 0.001) continue
+
+            const glowR = 14 + depthFrac * 18
+            ctx.globalAlpha = gAlpha
+            ctx.drawImage(wallGlowSprite, 0, 0, 32, 32,
+              sx - glowR, sy - glowR, glowR * 2, glowR * 2)
+          }
+        }
+        ctx.restore()
+      }
+
+      // Extended divertor floor glow: interpolated sources between strike pairs
+      if (nStrike >= 2 && strikeFade > 0.01) {
+        const FLOOR_INTERP = 4
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        for (let pair = 0; pair < nStrike - 1; pair += 2) {
+          const r0 = strikePointRZ[pair][0], z0 = strikePointRZ[pair][1]
+          const r1 = strikePointRZ[pair + 1][0], z1 = strikePointRZ[pair + 1][1]
+          for (let fi = 1; fi <= FLOOR_INTERP; fi++) {
+            const t = fi / (FLOOR_INTERP + 1)
+            const iR = r0 + (r1 - r0) * t
+            const iZ = z0 + (z1 - z0) * t
+            for (const s of sliceOrder) {
+              tmpV.x = iR * cosPhis[s]; tmpV.y = iR * sinPhis[s]; tmpV.z = iZ
+              const p2d = cam.project(tmpV)
+              if (!p2d) continue
+              const depthFrac = 1 - (sliceDepths[s] - minDepth) / depthRange
+              const gAlpha = illumAlpha * 0.6 * (0.3 + depthFrac * 0.7)
+              if (gAlpha < 0.001) continue
+              const glowR = 10 + depthFrac * 14
+              ctx.globalAlpha = gAlpha
+              ctx.drawImage(wallGlowSprite, 0, 0, 32, 32,
+                p2d.sx - glowR, p2d.sy - glowR, glowR * 2, glowR * 2)
+            }
+          }
+        }
+        ctx.restore()
+      }
     }
 
     // ── Step 5: ELM flash overlay ──
@@ -1406,7 +1420,7 @@ function drawLimiterWall(
 
   // Build individual quad faces with backface culling
   // Extended quad type: includes region classification for per-region rendering
-  const enum WallRegion { Outboard, Inboard, Limiter, ExtraPort, Antenna }
+  const enum WallRegion { Outboard, Inboard, Limiter, ExtraPort, Antenna, Divertor }
   interface WallQuad {
     corners: (ScreenPt | null)[]
     depth: number
@@ -1415,16 +1429,13 @@ function drawLimiterWall(
     qZ: number           // Z position for antenna louver pattern
     viewDot: number       // view angle for Fresnel-like specular
     tileHash: number      // per-tile brightness variation (0–1)
+    toroidalArc: number   // toroidal arc position for band rendering
   }
   const quads: WallQuad[] = []
 
   for (let s = 0; s < nSlices - 1; s++) {
     const phiMid = (phis[s] + phis[s + 1]) * 0.5
     const axisPt = toroidal(axisR, 0, phiMid)
-
-    // Toroidal arc lengths for grid spacing
-    const toroidalArc0 = phis[s] * axisR
-    const toroidalArc1 = phis[s + 1] * axisR
 
     for (let j = 0; j < nPts; j++) {
       const jn = (j + 1) % nPts
@@ -1461,6 +1472,11 @@ function drawLimiterWall(
         const dz = qcz - cfg.portZ
         if (dr * dr + dz * dz < cfg.portRadius * cfg.portRadius * 1.1) continue
       }
+
+      // Toroidal arc lengths for grid spacing — use local qR so tiles
+      // at the inboard wall (small R) are properly proportioned (square).
+      const toroidalArc0 = phis[s] * qR
+      const toroidalArc1 = phis[s + 1] * qR
 
       const sa = gridScr[s][j]
       const sb = gridScr[s][jn]
@@ -1521,11 +1537,16 @@ function drawLimiterWall(
         region = WallRegion.Inboard
       } else if (regions && Math.abs(qcz) > regions.limiterZThreshold) {
         region = WallRegion.Limiter
+      } else if (cfg.divertorRegion && qcz < cfg.divertorRegion.zThreshold) {
+        region = WallRegion.Divertor
       }
 
       // ── Per-region tile grid spacing ──
       let pGrid: number, tGrid: number
-      if (region === WallRegion.Inboard && regions) {
+      if (region === WallRegion.Divertor && cfg.divertorRegion) {
+        pGrid = cfg.divertorRegion.gridSpacing.poloidal
+        tGrid = cfg.divertorRegion.gridSpacing.toroidal
+      } else if (region === WallRegion.Inboard && regions) {
         pGrid = regions.inboardGridSpacing.poloidal
         tGrid = regions.inboardGridSpacing.toroidal
       } else if (region === WallRegion.Limiter && regions) {
@@ -1561,6 +1582,7 @@ function drawLimiterWall(
         qZ: qcz,
         viewDot,
         tileHash,
+        toroidalArc: toroidalArc0,
       })
     }
   }
@@ -1609,18 +1631,36 @@ function drawLimiterWall(
       }
       alpha = 0.85 + df * 0.14
     } else {
-      // Normal tile regions (inboard, outboard, limiter)
+      // Normal tile regions (inboard, outboard, limiter, divertor)
       const depthMod = 0.45 + df * 0.55
 
-      // Semi-reflective: per-tile brightness variation + Fresnel edge brightening
-      const tileVariation = 0.93 + q.tileHash * 0.14  // ±7% per-tile brightness
-      const fresnel = 1.0 + (1.0 - q.viewDot) * 0.25  // up to 25% brighter at grazing angles
-      const gridDim = q.isGridEdge ? (1 - cfg.tileGridDarken) : 1.0
+      // Per-device Fresnel strength + wider per-tile brightness variation
+      const tileVariation = 0.88 + q.tileHash * 0.24  // ±12% per-tile brightness
+      const fresnelStr = cfg.fresnelStrength ?? 0.25
+      const fresnel = 1.0 + (1.0 - q.viewDot) * fresnelStr
 
-      const mod = depthMod * gridDim * tileVariation * fresnel
-      r = Math.round(tr * mod)
-      g = Math.round(tg * mod)
-      b = Math.round(tb * mod)
+      // Divertor region: use darker tile color
+      let qtr = tr, qtg = tg, qtb = tb
+      if (q.region === WallRegion.Divertor && cfg.divertorRegion) {
+        ;[qtr, qtg, qtb] = cfg.divertorRegion.tileColor
+      }
+
+      // JET-style alternating vertical bands on inboard wall
+      let bandMod = 1.0
+      let gridDim: number
+      if (q.region === WallRegion.Inboard && cfg.inboardStyle === 'bands') {
+        const bw = cfg.bandWidth ?? 0.08
+        const bandIdx = Math.floor(q.toroidalArc / bw)
+        bandMod = (bandIdx & 1) === 0 ? 1.18 : 0.82  // alternating bright/dark columns
+        gridDim = 1.0  // band alternation IS the visual pattern — no additional grid lines
+      } else {
+        gridDim = q.isGridEdge ? (1 - cfg.tileGridDarken) : 1.0
+      }
+
+      const mod = depthMod * gridDim * tileVariation * fresnel * bandMod
+      r = Math.round(qtr * mod)
+      g = Math.round(qtg * mod)
+      b = Math.round(qtb * mod)
       alpha = 0.80 + df * 0.18
     }
 
