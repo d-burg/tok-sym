@@ -572,13 +572,22 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
         let csClipPath: Path2D | null = null
         const camR_cs = portCfg.camR
 
-        // Threshold: include all points inboard of the magnetic axis.
-        // Use deviceR0 (major radius) if available, otherwise lookR as proxy.
-        const ibThreshold = (deviceR0 ?? portCfg.lookR * 1.5) * 1.05
-
-        // Extract the contiguous inboard section of the limiter contour.
-        // Walk the closed loop to find where R drops below threshold.
+        // Find the center stack column: the narrow vertical section at the
+        // minimum R of the limiter contour.  Use a tight threshold so we only
+        // capture the actual center stack, NOT the upper/lower shelves or
+        // divertor region (which have larger R and would produce overly wide
+        // tangent angles, creating geometric clip artifacts).
         const nWallPts = resolvedWall.length
+        let minR = Infinity
+        for (let i = 0; i < nWallPts; i++) {
+          if (resolvedWall[i][0] < minR) minR = resolvedWall[i][0]
+        }
+        // Tight threshold: center stack R + 15% of the gap to the axis center.
+        // For DIII-D (minR≈1.017): threshold ≈ 1.017 * 1.15 ≈ 1.17
+        // This captures only the narrow CS column, not shelves at R≈1.3-1.7.
+        const ibThreshold = minR * 1.15
+
+        // Extract the contiguous center stack section of the limiter contour.
         let ibStartIdx = -1
         for (let i = 0; i < nWallPts; i++) {
           const iPrev = (i - 1 + nWallPts) % nWallPts
@@ -588,52 +597,23 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
           }
         }
 
-        // Collect inboard points in contour order
-        const ibProfile: [number, number][] = []
+        const csProfile: [number, number][] = []
         if (ibStartIdx >= 0) {
           for (let i = 0; i < nWallPts; i++) {
             const idx = (ibStartIdx + i) % nWallPts
             if (resolvedWall[idx][0] < ibThreshold) {
-              ibProfile.push(resolvedWall[idx])
+              csProfile.push(resolvedWall[idx])
             } else {
               break
             }
           }
         }
 
-        if (ibProfile.length >= 3) {
+        if (csProfile.length >= 2) {
           // Ensure top-to-bottom order (descending Z)
-          if (ibProfile[0][1] < ibProfile[ibProfile.length - 1][1]) {
-            ibProfile.reverse()
+          if (csProfile[0][1] < csProfile[csProfile.length - 1][1]) {
+            csProfile.reverse()
           }
-
-          // Trim profile to the center stack column only.
-          // The raw ibProfile may include divertor channel / shelf points where
-          // the wall curves away from vertical. Those points have small R and
-          // produce overly wide tangent angles, clipping glow in the divertor.
-          // Strategy: remove segments from both ends that are more horizontal
-          // than vertical (wall curving into divertor or upper shelf).
-          let trimTop = 0
-          for (let i = 1; i < ibProfile.length; i++) {
-            const dR = Math.abs(ibProfile[i][0] - ibProfile[i - 1][0])
-            const dZ = Math.abs(ibProfile[i][1] - ibProfile[i - 1][1])
-            if (dZ < 0.001 || dR / dZ > 0.6) {
-              trimTop = i  // this segment is mostly horizontal, trim it
-            } else {
-              break  // hit a vertical segment — start of center stack column
-            }
-          }
-          let trimBot = ibProfile.length
-          for (let i = ibProfile.length - 1; i >= 1; i--) {
-            const dR = Math.abs(ibProfile[i][0] - ibProfile[i - 1][0])
-            const dZ = Math.abs(ibProfile[i][1] - ibProfile[i - 1][1])
-            if (dZ < 0.001 || dR / dZ > 0.6) {
-              trimBot = i  // horizontal segment at bottom, trim it
-            } else {
-              break  // vertical segment — bottom of center stack column
-            }
-          }
-          const csProfile = ibProfile.slice(trimTop, trimBot)
 
           const leftEdge: { sx: number; sy: number }[] = []
           const rightEdge: { sx: number; sy: number }[] = []
@@ -652,21 +632,31 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
             if (rp) rightEdge.push({ sx: rp.sx, sy: rp.sy })
           }
 
-          if (leftEdge.length >= 3 && rightEdge.length >= 3) {
+          if (leftEdge.length >= 2 && rightEdge.length >= 2) {
             csClipPath = new Path2D()
             // Outer boundary: full canvas (all pixels initially included)
             csClipPath.rect(0, 0, W, H)
-            // Inner boundary: center stack silhouette (excluded by evenodd rule)
-            csClipPath.moveTo(leftEdge[0].sx, leftEdge[0].sy)
+            // Inner boundary: center stack silhouette (excluded by evenodd rule).
+            // Extend top and bottom beyond canvas edges so the cap connections
+            // never clip visible glow — only the curved left/right silhouette
+            // edges are within the viewport.
+            const topExtY = -200   // well above canvas
+            const botExtY = H + 200  // well below canvas
+            csClipPath.moveTo(leftEdge[0].sx, topExtY)
+            csClipPath.lineTo(leftEdge[0].sx, leftEdge[0].sy)
             for (let i = 1; i < leftEdge.length; i++) {
               csClipPath.lineTo(leftEdge[i].sx, leftEdge[i].sy)
             }
-            // Connect left bottom → right bottom
+            // Extend left bottom beyond canvas, connect to right bottom extension
+            csClipPath.lineTo(leftEdge[leftEdge.length - 1].sx, botExtY)
+            csClipPath.lineTo(rightEdge[rightEdge.length - 1].sx, botExtY)
             csClipPath.lineTo(rightEdge[rightEdge.length - 1].sx, rightEdge[rightEdge.length - 1].sy)
             // Right edge bottom-to-top
             for (let i = rightEdge.length - 2; i >= 0; i--) {
               csClipPath.lineTo(rightEdge[i].sx, rightEdge[i].sy)
             }
+            // Extend right top beyond canvas, connect back to left top extension
+            csClipPath.lineTo(rightEdge[0].sx, topExtY)
             csClipPath.closePath()
           }
         }
