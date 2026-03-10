@@ -104,9 +104,9 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     lookZ: -0.02,
     lookPhi: 0.28,        // turned right — more toroidal angle
     fov: 80,              // wide-angle ~18mm — fits wall vertically
-    tileColor: [28, 28, 30],       // dark matte carbon
-    tileGridSpacing: { poloidal: 0.10, toroidal: 0.08 },    // outboard wall default
-    tileGridDarken: 0.18,
+    tileColor: [58, 58, 62],       // metallic silver-gray (shiny graphite tiles)
+    tileGridSpacing: { poloidal: 0.10, toroidal: 0.10 },    // square tiles
+    tileGridDarken: 0.30,
     phiMin: -Math.PI,
     phiMax: Math.PI,
     plasmaPhiMin: -1.40,
@@ -128,7 +128,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       { r: 2.35, zMin: -0.28, zMax: 0.28, phiMin: 0.55, phiMax: 0.72 },   // ICRH antenna
       { r: 2.35, zMin: -0.12, zMax: 0.12, phiMin: -0.60, phiMax: -0.48 },  // ECH launcher
     ],
-    fresnelStrength: 0.15,
+    fresnelStrength: 0.55,
   },
   iter: {
     portR: 8.30,
@@ -1807,7 +1807,7 @@ function drawLimiterWall(
       const pDist = Math.min(pCellPos, 1 - pCellPos)
 
       // Smooth border: ramp from 0 (on grid) to 1 (inside tile) over borderWidth fraction
-      const borderWidth = 0.12  // 12% of tile width → narrow dark border
+      const borderWidth = 0.05  // 5% of tile width → narrow gap between tiles
       const tBorder = tGrid > 0 ? Math.min(tDist / borderWidth, 1.0) : 1.0
       const pBorder = pGrid > 0 ? Math.min(pDist / borderWidth, 1.0) : 1.0
       const gridProximity = tBorder * pBorder
