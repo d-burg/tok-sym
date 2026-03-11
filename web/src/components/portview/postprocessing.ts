@@ -32,7 +32,7 @@ export function createPostProcessing(
   // Higher strength (0.8) and radius (0.5) create the soft halo that
   // replaces Canvas 2D's multi-pass strokes at widths 9/6/3.5/1.5px.
   const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(size.x, size.y),
+    new THREE.Vector2(Math.ceil(size.x / 2), Math.ceil(size.y / 2)),
     0.7,   // strength — soft glow halo
     0.4,   // radius — spread of glow
     0.6,   // threshold — catch bright plasma lines + glow sprites
@@ -46,7 +46,7 @@ export function createPostProcessing(
   const resize = (width: number, height: number, pr: number) => {
     composer.setSize(width, height)
     composer.setPixelRatio(pr)
-    bloomPass.resolution.set(width, height)
+    bloomPass.resolution.set(Math.ceil(width / 2), Math.ceil(height / 2))
   }
 
   return { composer, bloomPass, resize }

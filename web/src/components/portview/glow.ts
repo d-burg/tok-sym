@@ -3,7 +3,7 @@ import type { PortConfig } from './types'
 import { toroidal } from './types'
 import { STRIKE_FADE_RATE } from './config'
 
-const GLOW_SLICES = 200
+const GLOW_SLICES = 600
 const POINTS_PER_STRIKE = GLOW_SLICES
 
 // Glow color — warm orange
@@ -12,8 +12,30 @@ const GLOW_COLOR = { r: 1.0, g: 0.45, b: 0.15 }
 // Base glow intensity multiplier
 const GLOW_INTENSITY = 2.0
 
-// Point size for glow sprites (world units, attenuated by distance)
-const BASE_POINT_SIZE = 0.4
+// Point size — large enough that adjacent points overlap into a continuous band
+const BASE_POINT_SIZE = 0.30
+
+// Max strike points we'll ever render (generous upper bound)
+const MAX_STRIKE_POINTS = 8
+const MAX_GLOW_POINTS = MAX_STRIKE_POINTS * POINTS_PER_STRIKE
+
+// ═══ STOCHASTIC JITTER PARAMETERS ═══
+// Subtle R/Z position jitter amplitude (meters) — keeps the band alive
+const JITTER_AMPLITUDE = 0.006
+// Fast jitter time rate — how quickly position noise evolves
+const JITTER_RATE = 18.0
+// Brightness flicker depth (0 = uniform, 1 = full range)
+const FLICKER_DEPTH = 0.35
+// Flicker time rate — how fast brightness changes (Hz-like seed rate)
+const FLICKER_RATE = 25.0
+// Slow brightness modulation rate — broad undulations along the ring
+const MODULATION_RATE = 3.0
+
+/** Deterministic pseudo-random in [0,1) for cacheable jitter. */
+function pseudoRandom(seed: number): number {
+  const x = Math.sin(seed) * 43758.5453
+  return x - Math.floor(x)
+}
 
 export interface GlowGroup {
   group: THREE.Group
@@ -73,6 +95,15 @@ function createGlowTexture(size = 64): THREE.CanvasTexture {
 /**
  * Create the glow rendering group for strike point sprites.
  * Uses PointsMaterial with canvas texture and vertex colors.
+ *
+ * Renders the SOL (scrape-off layer) as a uniform continuous glowing band:
+ * - 600 overlapping point sprites per strike → seamless band, not discrete orbs
+ * - Fast stochastic brightness jitter → simulates turbulent opacity/width variation
+ * - Subtle R/Z position jitter → heat-shimmer alive-ness
+ * - Positions rebuild only when strike points change; colors + jitter update every frame
+ *
+ * Performance: pre-allocates a single Points object and buffers (4800 points max).
+ * Position jitter + color update every frame (~0.1ms CPU cost).
  */
 export function createGlowGroup(cfg: PortConfig): GlowGroup {
   const group = new THREE.Group()
@@ -94,78 +125,107 @@ export function createGlowGroup(cfg: PortConfig): GlowGroup {
 
   let storedPixelRatio = 1
 
-  const result: GlowGroup = {
+  // ═══ PRE-ALLOCATED BUFFERS ═══
+  const posBuffer = new Float32Array(MAX_GLOW_POINTS * 3)
+  const colBuffer = new Float32Array(MAX_GLOW_POINTS * 3)
+
+  // Base positions (without jitter) — rebuilt only when strike points change
+  const basePosR = new Float32Array(MAX_GLOW_POINTS)
+  const basePosZ = new Float32Array(MAX_GLOW_POINTS)
+  const basePhi = new Float32Array(MAX_GLOW_POINTS)
+  // Cached phi fade factor — only changes when strike points change
+  const cachedFade = new Float32Array(MAX_GLOW_POINTS)
+
+  // Single persistent geometry + Points (never disposed/recreated)
+  const geometry = new THREE.BufferGeometry()
+  const posAttr = new THREE.BufferAttribute(posBuffer, 3)
+  posAttr.setUsage(THREE.DynamicDrawUsage)
+  const colAttr = new THREE.BufferAttribute(colBuffer, 3)
+  colAttr.setUsage(THREE.DynamicDrawUsage)
+  geometry.setAttribute('position', posAttr)
+  geometry.setAttribute('color', colAttr)
+
+  const points = new THREE.Points(geometry, material)
+  points.renderOrder = 3
+  points.frustumCulled = false
+  points.visible = false
+  group.add(points)
+
+  let activeCount = 0
+  let lastStrikeFP = ''
+
+  // Phi range constants
+  const phiSpan = cfg.phiMax - cfg.phiMin
+
+  const update = (params: GlowUpdateParams) => {
+    if (params.strikePoints.length === 0 || params.intensity <= 0) {
+      points.visible = false
+      activeCount = 0
+      lastStrikeFP = ''
+      return
+    }
+
+    const time = params.time
+    const intensityBase = params.intensity * params.powerScale * GLOW_INTENSITY
+
+    // Strike point fingerprint for change detection
+    const fp = params.strikePoints
+      .map(sp => `${sp.r.toFixed(4)},${sp.z.toFixed(4)}`)
+      .join(':')
+
+    if (fp !== lastStrikeFP) {
+      // ═══ BASE POSITION REBUILD (strike points changed) ═══
+      let vi = 0
+      for (const sp of params.strikePoints) {
+        for (let si = 0; si < POINTS_PER_STRIKE && vi < MAX_GLOW_POINTS; si++) {
+          const phi = cfg.phiMin + (si / (POINTS_PER_STRIKE - 1)) * phiSpan
+          basePosR[vi] = sp.r
+          basePosZ[vi] = sp.z
+          basePhi[vi] = phi
+          cachedFade[vi] = Math.exp(-Math.abs(phi) * STRIKE_FADE_RATE)
+          vi++
+        }
+      }
+      activeCount = vi
+      lastStrikeFP = fp
+    }
+
+    // ═══ PER-FRAME UPDATE: position jitter + stochastic brightness ═══
+    for (let vi = 0; vi < activeCount; vi++) {
+      // Subtle R/Z position jitter — fast-evolving for heat-shimmer effect
+      const jitR = JITTER_AMPLITUDE * (pseudoRandom(vi * 127.1 + time * JITTER_RATE) - 0.5)
+      const jitZ = JITTER_AMPLITUDE * (pseudoRandom(vi * 269.5 + time * JITTER_RATE) - 0.5)
+
+      const v = toroidal(basePosR[vi] + jitR, basePosZ[vi] + jitZ, basePhi[vi])
+      posBuffer[vi * 3] = v.x
+      posBuffer[vi * 3 + 1] = v.y
+      posBuffer[vi * 3 + 2] = v.z
+
+      // Stochastic brightness — fast random flicker simulates turbulent opacity/width
+      // Multiple overlapping noise frequencies for natural turbulent appearance
+      const fastNoise = pseudoRandom(vi * 43.7 + Math.floor(time * FLICKER_RATE))
+      const slowWave = 0.5 + 0.5 * Math.sin(basePhi[vi] * 3.0 + time * MODULATION_RATE)
+      const flicker = 1.0 - FLICKER_DEPTH * fastNoise * (0.6 + 0.4 * slowWave)
+
+      const brightness = intensityBase * cachedFade[vi] * flicker
+
+      colBuffer[vi * 3] = GLOW_COLOR.r * brightness
+      colBuffer[vi * 3 + 1] = GLOW_COLOR.g * brightness
+      colBuffer[vi * 3 + 2] = GLOW_COLOR.b * brightness
+    }
+
+    posAttr.needsUpdate = true
+    colAttr.needsUpdate = true
+    geometry.setDrawRange(0, activeCount)
+    points.visible = true
+  }
+
+  return {
     group,
     get pixelRatio() { return storedPixelRatio },
     set pixelRatio(v: number) { storedPixelRatio = v },
-    update: () => {},
+    update,
   }
-
-  const update = (params: GlowUpdateParams) => {
-    // Clear old points
-    while (group.children.length > 0) {
-      const child = group.children[0]
-      group.remove(child)
-      if (child instanceof THREE.Points) {
-        child.geometry.dispose()
-      }
-    }
-
-    if (params.strikePoints.length === 0 || params.intensity <= 0) return
-
-    // Flicker based on time (matches original shader)
-    const time = params.time
-
-    // Build point cloud for all strike points across full toroidal range
-    const totalPts = params.strikePoints.length * POINTS_PER_STRIKE
-    const positions = new Float32Array(totalPts * 3)
-    const colors = new Float32Array(totalPts * 3)
-
-    let vi = 0
-    for (const sp of params.strikePoints) {
-      for (let si = 0; si < POINTS_PER_STRIKE; si++) {
-        const phi = cfg.phiMin + (si / (POINTS_PER_STRIKE - 1)) * (cfg.phiMax - cfg.phiMin)
-
-        // SOL turbulence: position jitter
-        const jitterR = (Math.random() - 0.5) * 0.02
-        const jitterZ = (Math.random() - 0.5) * 0.02
-        const v = toroidal(sp.r + jitterR, sp.z + jitterZ, phi)
-
-        positions[vi * 3] = v.x
-        positions[vi * 3 + 1] = v.y
-        positions[vi * 3 + 2] = v.z
-
-        // Per-point brightness: intensity * fadeFactor * powerScale * GLOW_INTENSITY
-        const phiDist = Math.abs(phi)
-        const fadeFactor = Math.exp(-phiDist * STRIKE_FADE_RATE)
-
-        // Flicker per point (random phase baked into position index)
-        const phase = (vi * 0.618033988) % 1.0  // golden ratio hash for phase
-        const flicker = 0.85 + 0.15 * Math.sin(time * 12.0 + phase * 6.283)
-
-        const brightness = params.intensity * fadeFactor * params.powerScale * GLOW_INTENSITY * flicker
-
-        // Vertex color = glowColor * brightness
-        colors[vi * 3] = GLOW_COLOR.r * brightness
-        colors[vi * 3 + 1] = GLOW_COLOR.g * brightness
-        colors[vi * 3 + 2] = GLOW_COLOR.b * brightness
-
-        vi++
-      }
-    }
-
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
-    const points = new THREE.Points(geometry, material)
-    points.renderOrder = 3
-    points.frustumCulled = false
-    group.add(points)
-  }
-
-  result.update = update
-  return result
 }
 
 /**
