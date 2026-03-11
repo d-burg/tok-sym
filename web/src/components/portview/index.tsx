@@ -269,15 +269,15 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       })
 
       // Update wall illumination from strike points
-      // Place at multiple phi positions so glow wraps toroidally
+      // Place at multiple phi positions so glow wraps toroidally around the full torus
       if (state.wallMaterial && strikePoints.length > 0) {
         const spUniforms: { x: number; y: number; z: number; intensity: number }[] = []
-        const phis = [-0.4, 0, 0.4]
+        const phis = [-1.2, -0.6, 0, 0.6, 1.2]
         for (const sp of strikePoints) {
           for (const phi of phis) {
             if (spUniforms.length >= 8) break
             const v = toroidal(sp.r, sp.z, phi)
-            const fadeFactor = Math.exp(-Math.abs(phi) * 0.8)
+            const fadeFactor = Math.exp(-Math.abs(phi) * 0.5)
             spUniforms.push({ x: v.x, y: v.y, z: v.z, intensity: powerScale * 0.5 * fadeFactor })
           }
         }
