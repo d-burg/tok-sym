@@ -218,7 +218,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     if (!snapshot) return
 
-    const cfg = getPortConfig(deviceId, deviceR0, deviceA)
+    getPortConfig(deviceId, deviceR0, deviceA)
     const opacityScale = DEVICE_OPACITY_SCALE[deviceId ?? ''] ?? DEFAULT_OPACITY_SCALE
     const powerScale = DEVICE_POWER_SCALE[deviceId ?? ''] ?? DEFAULT_POWER_SCALE
     const glowTuning = DEVICE_GLOW_TUNING[deviceId ?? ''] ?? DEFAULT_GLOW_TUNING

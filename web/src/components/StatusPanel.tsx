@@ -223,7 +223,6 @@ export default function StatusPanel({
 
 function PowerBalance({ snapshot: s, fusion }: { snapshot: Snapshot; fusion: FusionState | null }) {
   const isDT = fusion?.fuel_type === 'DT'
-  const pFus = fusion?.p_fus ?? 0
   const pAlpha = fusion?.p_alpha ?? 0
 
   // Input side: external heating + alpha heating (for DT)

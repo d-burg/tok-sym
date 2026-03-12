@@ -169,14 +169,12 @@ export function useSimulation(
     // Track peak Dα and any ELM across all sub-steps so that ELMs
     // are reliably captured even when many physics steps are skipped.
     let maxDAlpha = 0
-    let anyElmActive = false
 
     for (let i = 0; i < stepsThisFrame; i++) {
       const json = sim.step(DT)
       snap = JSON.parse(json)
       if (snap) {
         if (snap.diagnostics.d_alpha > maxDAlpha) maxDAlpha = snap.diagnostics.d_alpha
-        if (snap.elm_active) anyElmActive = true
       }
       if (snap && (snap.status === 'Complete' || snap.status === 'Disrupted')) {
         runningRef.current = false

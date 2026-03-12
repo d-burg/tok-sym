@@ -237,7 +237,7 @@ export function findStrikePoints(
   limiterPts: [number, number][],
   xpointR: number,
   xpointZ: number,
-  axisR: number,
+  _axisR: number,
 ): StrikePoint[] {
   if (sepPts.length < 4 || xpointR <= 0) return []
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { Contour } from '../../lib/types'
 import type { PortConfig } from './types'
-import { toroidal, truncateAtWall, subsample, splitChains, densifyContour } from './types'
+import { truncateAtWall, subsample, splitChains, densifyContour } from './types'
 
 // ── Separatrix: mesh-based volumetric rendering ──
 // The separatrix is rendered as multiple thin toroidal mesh shells with
@@ -178,7 +178,7 @@ function smoothContour(pts: [number, number][], iterations: number): [number, nu
  * Face-on slices (nearest camera) → short path → dim.
  * Tangential slices (toroidal limbs) → long path → bright.
  */
-function computePathFactors(
+export function computePathFactors(
   cfg: PortConfig,
   rGeo: number,
   nSlices: number,

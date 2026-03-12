@@ -179,7 +179,7 @@ export default function ShotPlanner({
     for (const param of SCALAR_PARAMS) {
       if (overrides[param.key] !== null && overrides[param.key] !== undefined) {
         const wf = baseProgram[param.waveformKey] as WaveformPoint[]
-        ;(modified as Record<string, unknown>)[param.waveformKey] = scaleWaveform(wf, overrides[param.key]!)
+        ;(modified as unknown as Record<string, unknown>)[param.waveformKey] = scaleWaveform(wf, overrides[param.key]!)
       }
     }
 
@@ -190,7 +190,7 @@ export default function ShotPlanner({
       const waveformKeys: (keyof DischargeProgram)[] = ['ip', 'bt', 'ne_target', 'p_nbi', 'p_ech', 'p_ich', 'kappa', 'delta', 'd2_puff', 'neon_puff']
       for (const k of waveformKeys) {
         const wf = modified[k] as WaveformPoint[]
-        ;(modified as Record<string, unknown>)[k] = wf.map(([t, v]) => [t * timeScale, v] as WaveformPoint)
+        ;(modified as unknown as Record<string, unknown>)[k] = wf.map(([t, v]) => [t * timeScale, v] as WaveformPoint)
       }
     }
 

@@ -205,7 +205,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     // --- R / Z Axes ---
     // Pick a "nice" tick step that avoids overcrowding at small panel sizes.
     // pixelsPerUnit lets us adapt to actual rendered size.
-    const niceStep = (range: number, pixelsPerUnit: number) => {
+    const niceStep = (_range: number, pixelsPerUnit: number) => {
       // Target ~40-60 px between ticks
       const candidates = [0.1, 0.2, 0.5, 1.0, 2.0]
       for (const c of candidates) {

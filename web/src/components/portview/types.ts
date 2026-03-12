@@ -46,14 +46,15 @@ export interface PortConfig {
 }
 
 /** Wall region classification for per-region rendering. */
-export const enum WallRegion {
-  Outboard = 0,
-  Inboard = 1,
-  Limiter = 2,
-  ExtraPort = 3,
-  Antenna = 4,
-  Divertor = 5,
-}
+export const WallRegion = {
+  Outboard: 0,
+  Inboard: 1,
+  Limiter: 2,
+  ExtraPort: 3,
+  Antenna: 4,
+  Divertor: 5,
+} as const
+export type WallRegion = (typeof WallRegion)[keyof typeof WallRegion]
 
 /** Toroidal coordinate conversion: (R, Z, phi) → cartesian (x, y, z). */
 export function toroidal(R: number, Z: number, phi: number): Vec3 {

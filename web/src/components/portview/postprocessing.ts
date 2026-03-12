@@ -19,8 +19,6 @@ export function createPostProcessing(
   camera: THREE.PerspectiveCamera,
 ): PostProcessingPipeline {
   const size = renderer.getSize(new THREE.Vector2())
-  const pixelRatio = renderer.getPixelRatio()
-
   const composer = new EffectComposer(renderer)
 
   // Main render pass
