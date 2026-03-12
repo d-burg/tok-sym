@@ -1,6 +1,9 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDevices, type Device } from '../lib/wasm'
+import { DIIID_LIMITER } from '../lib/diiid-geometry'
+import { JET_LIMITER } from '../lib/jet-geometry'
+import { ITER_LIMITER } from '../lib/iter-geometry'
 
 /** Extra display-only metadata keyed by device id. */
 const DEVICE_META: Record<string, { location: string; desc: string }> = {
@@ -18,9 +21,15 @@ const DEVICE_META: Record<string, { location: string; desc: string }> = {
   },
 }
 
-/** Tiny SVG cross-section silhouette from the wall outline. */
+const DEVICE_LIMITERS: Record<string, [number, number][]> = {
+  diiid: DIIID_LIMITER,
+  jet: JET_LIMITER,
+  iter: ITER_LIMITER,
+}
+
+/** SVG cross-section silhouette from limiter geometry (or wall outline fallback). */
 function DeviceSilhouette({ device }: { device: Device }) {
-  const wall = device.wall_outline
+  const wall = DEVICE_LIMITERS[device.id] ?? device.wall_outline
   if (wall.length === 0) return null
 
   // Find bounds for viewBox
@@ -34,14 +43,15 @@ function DeviceSilhouette({ device }: { device: Device }) {
   const w = rMax - rMin + 2 * pad
   const h = zMax - zMin + 2 * pad
 
+  // Flip Z so higher Z appears visually higher (matching EquilibriumCanvas)
   const pathData =
     wall
-      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`)
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${-p[1]}`)
       .join(' ') + ' Z'
 
   return (
     <svg
-      viewBox={`${rMin - pad} ${zMin - pad} ${w} ${h}`}
+      viewBox={`${rMin - pad} ${-zMax - pad} ${w} ${h}`}
       className="w-full h-32 opacity-30 group-hover:opacity-60 transition-opacity"
       preserveAspectRatio="xMidYMid meet"
     >
@@ -71,9 +81,8 @@ export default function DeviceSelect() {
     <div className="min-h-screen flex flex-col items-center justify-center p-8">
       {/* Header */}
       <div className="text-center mb-12">
-        <h1 className="text-5xl font-bold tracking-tight mb-2">
-          <span className="text-cyan-400">Tok</span>
-          <span className="text-amber-400">Sym</span>
+        <h1 className="text-4xl font-bold tracking-tight mb-2 text-white">
+          fusionsimulator<span className="text-gray-500">.io</span>
         </h1>
         <p className="text-gray-400 text-lg">
           Real-time tokamak discharge simulator
@@ -88,7 +97,7 @@ export default function DeviceSelect() {
             <button
               key={d.id}
               onClick={() => navigate(`/program/${d.id}`)}
-              className="group bg-gray-900 border border-gray-700 rounded-xl p-6 text-left
+              className="group bg-gray-900 border border-gray-700 rounded-lg p-6 text-left
                          hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/10
                          transition-all duration-200 cursor-pointer"
             >

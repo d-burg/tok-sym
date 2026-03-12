@@ -11,7 +11,7 @@ interface Settings {
 }
 
 const SettingsContext = createContext<Settings>({
-  theme: 'classic',
+  theme: 'modern',
   units: 'metric',
   setTheme: () => {},
   setUnits: () => {},
@@ -19,7 +19,7 @@ const SettingsContext = createContext<Settings>({
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    return (localStorage.getItem('tok-sym-theme') as Theme) || 'classic'
+    return (localStorage.getItem('tok-sym-theme') as Theme) || 'modern'
   })
   const [units, setUnits] = useState<Units>(() => {
     return (localStorage.getItem('tok-sym-units') as Units) || 'metric'

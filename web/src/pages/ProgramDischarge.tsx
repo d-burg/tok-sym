@@ -165,7 +165,7 @@ export default function ProgramDischarge() {
 
       {/* Waveform detail panel */}
       {program && (
-        <div className="w-full bg-gray-900 border border-gray-700 rounded-xl p-5 mb-8">
+        <div className="w-full bg-gray-900 border border-gray-700 rounded-lg p-5 mb-8">
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-300">
               Programmed Waveforms

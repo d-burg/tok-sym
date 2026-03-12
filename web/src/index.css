@@ -373,6 +373,12 @@ body {
 [data-theme="modern"] .hover\:border-cyan-600:hover {
   border-color: rgba(255, 255, 255, 0.3);
 }
+[data-theme="modern"] .hover\:border-cyan-500:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+[data-theme="modern"] .hover\:shadow-cyan-500\/10:hover {
+  box-shadow: none;
+}
 [data-theme="modern"] .focus\:border-cyan-500:focus {
   border-color: rgba(255, 255, 255, 0.35);
 }
