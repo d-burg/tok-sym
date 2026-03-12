@@ -477,8 +477,41 @@ export const powerBalanceInfo = (
       <Cite doi="10.1088/0029-5515/39/12/301">ITER Physics Basis, Nucl. Fusion 39 (1999)</Cite>{' '}
       &mdash; power balance and confinement scaling.
     </Ref>
+    <Heading>Fusion Power &amp; Q</Heading>
+    <p>
+      In a burning plasma, fusion reactions release energy. For D-T fuel,
+      each reaction produces a 14.1 MeV neutron and a 3.5 MeV alpha particle.
+      The alpha heats the plasma (P<sub>α</sub> = P<sub>fus</sub>/5), while
+      neutrons escape to blanket modules.
+    </p>
+    <p className="text-cyan-300 text-center my-1">
+      Q = P<sub>fus</sub> / P<sub>heat</sub>
+    </p>
+    <p>
+      Q &gt; 1 means more fusion power out than heating power in. The ITER
+      target is Q &ge; 10 (500 MW from 50 MW heating). JET achieved
+      Q = 0.67 in 1997 with D-T fuel. D-D devices (DIII-D, JET standard)
+      produce negligible fusion power.
+    </p>
+    <Heading>Neutron Diagnostics</Heading>
+    <p>
+      Neutrons from fusion reactions are the primary energy carrier in a
+      reactor. They are detected by fission chambers (<sup>235</sup>U
+      for thermal, <sup>238</sup>U for fast neutrons), activation foils,
+      and neutron cameras (fan-beam collimated arrays for spatial
+      resolution). The neutron rate is proportional to fusion power.
+    </p>
+    <p>
+      This simulator uses the Bosch &amp; Hale (1992) parameterization
+      of the D-T and D-D reactivities, integrated over the density and
+      temperature profiles.
+    </p>
     <Ref>
-      Wesson, <i>Tokamaks</i>, 4th ed., Oxford Univ. Press (2011) &mdash; Ch. 3 (Power balance).
+      <Cite doi="10.1088/0029-5515/32/4/611">H.-S. Bosch &amp; G. M. Hale, Nucl. Fusion 32 (1992) 611</Cite>{' '}
+      &mdash; fusion reactivity parameterization.
+    </Ref>
+    <Ref>
+      Wesson, <i>Tokamaks</i>, 4th ed., Oxford Univ. Press (2011) &mdash; Ch. 3 (Power balance), Ch. 14 (Fusion products).
     </Ref>
   </>
 )

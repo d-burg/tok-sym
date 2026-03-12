@@ -288,7 +288,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     ctx.textAlign = 'left'
     if (snapshot) {
       const labelX = 8
-      let labelY = H - 8
+      let labelY = H - 22
       ctx.fillText(`q₉₅ = ${snapshot.q95.toFixed(2)}`, labelX, labelY)
       labelY -= 16
       ctx.fillText(`βN = ${snapshot.beta_n.toFixed(2)}`, labelX, labelY)
