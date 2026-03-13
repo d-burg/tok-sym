@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { getDevices, type Device } from '../lib/wasm'
 import { DIIID_LIMITER } from '../lib/diiid-geometry'
 import { JET_LIMITER } from '../lib/jet-geometry'
@@ -158,9 +158,33 @@ export default function DeviceSelect() {
       </div>
 
       {/* Footer */}
-      <p className="mt-12 text-gray-600 text-xs">
-        Open-source · Educational · Not for engineering use
-      </p>
+      <footer className="mt-12 max-w-3xl w-full text-center space-y-4">
+        {/* Disclaimer */}
+        <div className="px-5 py-3 rounded-lg border border-gray-800 bg-gray-900/50 text-gray-500 text-[11px] leading-relaxed">
+          <strong className="text-gray-400">Disclaimer:</strong> This simulator uses zero-dimensional
+          scaling laws and analytic approximations (0D power balance, IPB98(y,2) confinement scaling,
+          Cerfon-Freidberg equilibrium). Results are designed for{' '}
+          <em>qualitative educational use</em> and should not be interpreted as engineering
+          predictions or used for reactor design.
+        </div>
+
+        {/* Links row */}
+        <div className="flex items-center justify-center gap-3 text-gray-600 text-xs">
+          <span>Open-source · Educational</span>
+          <span className="text-gray-700">·</span>
+          <Link
+            to="/bibliography"
+            className="text-cyan-600 hover:text-cyan-400 transition-colors"
+          >
+            Physics Bibliography
+          </Link>
+        </div>
+
+        {/* Attribution */}
+        <p className="text-gray-600 text-[11px]">
+          &copy; 2026 Daniel Burgess and the Columbia Fusion Research Center
+        </p>
+      </footer>
 
       {/* ─── Tutorial prompt overlay ─── */}
       {showTutorialPrompt && (
