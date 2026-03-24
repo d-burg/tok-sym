@@ -1,10 +1,49 @@
 import * as THREE from 'three'
 import type { PortConfig } from './types'
+import type { ResolvedPort } from './geometry'
 import wallVert from './shaders/wall.vert?raw'
 import wallFrag from './shaders/wall.frag?raw'
 
 export interface StrikePointUniform {
   x: number; y: number; z: number; intensity: number
+}
+
+const MAX_PORTS = 32
+
+/**
+ * Create a 32×2 RGBA Float DataTexture encoding extra port positions.
+ * Stores port centers in **Cartesian** coordinates so the fragment shader
+ * can use simple 3D Euclidean distance (robust, no coordinate transform issues).
+ *
+ * Row 0: (centerX, centerY, centerZ, radius) per port
+ * Row 1: (zRadius, 0, 0, 0) per port
+ */
+export function createPortDataTexture(ports: ResolvedPort[]): THREE.DataTexture {
+  const data = new Float32Array(MAX_PORTS * 2 * 4) // 32 wide × 2 tall × RGBA
+  for (let i = 0; i < Math.min(ports.length, MAX_PORTS); i++) {
+    const p = ports[i]
+    // Convert (R, Z, phi) → Cartesian (x, y, z)
+    const cx = p.wallR * Math.cos(p.phi)
+    const cy = p.wallR * Math.sin(p.phi)
+    const cz = p.wallZ
+    // Row 0: (x, y, z, radius)
+    const r0 = i * 4
+    data[r0]     = cx
+    data[r0 + 1] = cy
+    data[r0 + 2] = cz
+    data[r0 + 3] = p.radius
+    // Row 1: (zRadius, 0, 0, 0)
+    const r1 = (MAX_PORTS + i) * 4
+    data[r1]     = p.zRadius
+    data[r1 + 1] = 0
+    data[r1 + 2] = 0
+    data[r1 + 3] = 0
+  }
+  const tex = new THREE.DataTexture(data, MAX_PORTS, 2, THREE.RGBAFormat, THREE.FloatType)
+  tex.minFilter = THREE.NearestFilter
+  tex.magFilter = THREE.NearestFilter
+  tex.needsUpdate = true
+  return tex
 }
 
 /**
@@ -37,11 +76,46 @@ export function createWallMaterial(cfg: PortConfig, totalArc: number): THREE.Sha
       u_hasDivertor: { value: cfg.divertorRegion ? 1.0 : 0.0 },
       u_inboardStyle: { value: cfg.inboardStyle === 'bands' ? 1.0 : 0.0 },
       u_bandWidth: { value: cfg.bandWidth ?? 0.06 },
+      u_vertBandWidth: { value: cfg.vertBandWidth ?? 0 },
+      u_vertBandContrast: { value: cfg.vertBandContrast ?? 0.12 },
       u_strikePoints: { value: Array(8).fill(null).map(() => new THREE.Vector4(0, 0, 0, 0)) },
       u_nStrikePoints: { value: 0 },
       u_strikeColor: { value: new THREE.Vector3(1.0, 0.4, 0.15) },  // default warm orange, overridden per-device
+      // Extra port positions: (x, y, z, radius) in Cartesian
+      u_extraPorts: { value: Array(64).fill(null).map(() => new THREE.Vector4(0, 0, 0, 0)) },
+      // Extra port shape info: (shape, toroidalExtent, zRadius, 0)
+      // shape: 0=circle, 1=square, 2=stadium
+      u_extraPortInfo: { value: Array(64).fill(null).map(() => new THREE.Vector4(0, 0, 0, 0)) },
+      u_nExtraPorts: { value: 0 },
     },
   })
+}
+
+/**
+ * Set extra port positions on the wall shader.
+ * Converts (R, Z, φ) → Cartesian and packs into vec4(x, y, z, radius).
+ */
+export function setExtraPortUniforms(
+  material: THREE.ShaderMaterial,
+  ports: ResolvedPort[],
+): void {
+  const arr = material.uniforms.u_extraPorts.value as THREE.Vector4[]
+  const info = material.uniforms.u_extraPortInfo.value as THREE.Vector4[]
+  const n = Math.min(ports.length, 64)
+  for (let i = 0; i < 64; i++) {
+    if (i < n) {
+      const p = ports[i]
+      const cx = p.wallR * Math.cos(p.phi)
+      const cy = p.wallR * Math.sin(p.phi)
+      const cz = p.wallZ
+      arr[i].set(cx, cy, cz, p.radius)
+      info[i].set(p.shape, p.toroidalExtent, p.zRadius, p.textureType)
+    } else {
+      arr[i].set(0, 0, 0, 0)
+      info[i].set(0, 0, 0, 0)
+    }
+  }
+  material.uniforms.u_nExtraPorts.value = n
 }
 
 /**
