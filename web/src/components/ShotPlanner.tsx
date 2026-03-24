@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import WaveformDrawer from './WaveformDrawer'
 import {
   getPreset,
   getDevice,
@@ -22,13 +23,15 @@ interface ScalarParam {
 
 type MagneticConfig = 'LowerSingleNull' | 'DoubleNull' | 'UpperSingleNull'
 
+type OverrideValue = number | WaveformPoint[] | null
+
 interface Props {
   deviceId: string
   onRun: (deviceId: string, programJson: string) => void
   onClose: () => void
   /* Lifted state from ControlRoom — persists across open/close */
-  overrides: Record<string, number | null>
-  onOverridesChange: (overrides: Record<string, number | null>) => void
+  overrides: Record<string, OverrideValue>
+  onOverridesChange: (overrides: Record<string, OverrideValue>) => void
   durationOverride: number | null
   onDurationChange: (d: number | null) => void
   basePreset: PresetId
@@ -103,8 +106,8 @@ function WaveformSparkline({ waveform, color }: { waveform: WaveformPoint[]; col
   const tMax = waveform[waveform.length - 1][0]
   const vMax = Math.max(...waveform.map((p) => p[1]), 0.01)
 
-  const W = 80
-  const H = 20
+  const W = 110
+  const H = 24
   const padding = 2
 
   const points = waveform
@@ -144,8 +147,11 @@ export default function ShotPlanner({
   // Get the effective value for a parameter
   const getEffectiveValue = useCallback(
     (param: ScalarParam): number => {
-      if (overrides[param.key] !== null && overrides[param.key] !== undefined) {
-        return overrides[param.key]!
+      const ov = overrides[param.key]
+      if (ov !== null && ov !== undefined) {
+        // Array override (drawn waveform) → use its flat-top value
+        if (Array.isArray(ov)) return getFlatTopValue(ov)
+        return ov
       }
       if (!baseProgram) return 0
       const wf = baseProgram[param.waveformKey] as WaveformPoint[]
@@ -154,20 +160,25 @@ export default function ShotPlanner({
     [overrides, baseProgram],
   )
 
-  // Get the effective waveform (with scaling applied)
+  // Get the effective waveform (with scaling or drawn waveform)
   const getEffectiveWaveform = useCallback(
     (param: ScalarParam): WaveformPoint[] => {
       if (!baseProgram) return []
-      const wf = baseProgram[param.waveformKey] as WaveformPoint[]
-      if (overrides[param.key] !== null && overrides[param.key] !== undefined) {
-        return scaleWaveform(wf, overrides[param.key]!)
+      const ov = overrides[param.key]
+      if (ov !== null && ov !== undefined) {
+        // Array override → use the drawn waveform directly
+        if (Array.isArray(ov)) return ov
+        // Scalar override → scale the base waveform
+        const wf = baseProgram[param.waveformKey] as WaveformPoint[]
+        return scaleWaveform(wf, ov)
       }
-      return wf
+      return baseProgram[param.waveformKey] as WaveformPoint[]
     },
     [overrides, baseProgram],
   )
 
   const effectiveDuration = durationOverride ?? baseProgram?.duration ?? 10
+  const [drawingParam, setDrawingParam] = useState<string | null>(null)
 
   // Build the modified program and run
   const handleRun = useCallback(() => {
@@ -177,9 +188,16 @@ export default function ShotPlanner({
 
     // Apply waveform overrides
     for (const param of SCALAR_PARAMS) {
-      if (overrides[param.key] !== null && overrides[param.key] !== undefined) {
-        const wf = baseProgram[param.waveformKey] as WaveformPoint[]
-        ;(modified as unknown as Record<string, unknown>)[param.waveformKey] = scaleWaveform(wf, overrides[param.key]!)
+      const ov = overrides[param.key]
+      if (ov !== null && ov !== undefined) {
+        if (Array.isArray(ov)) {
+          // Drawn waveform → use directly
+          ;(modified as unknown as Record<string, unknown>)[param.waveformKey] = ov
+        } else {
+          // Scalar → scale the base waveform
+          const wf = baseProgram[param.waveformKey] as WaveformPoint[]
+          ;(modified as unknown as Record<string, unknown>)[param.waveformKey] = scaleWaveform(wf, ov)
+        }
       }
     }
 
@@ -222,11 +240,14 @@ export default function ShotPlanner({
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-80 bg-[#0d1117] border-l border-gray-700 z-50
+    <div className="fixed inset-y-0 right-0 w-96 bg-[#0d1117] border-l border-gray-700 z-50
                     flex flex-col shadow-2xl shadow-black/50">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-gray-800">
-        <h2 className="text-sm font-bold text-gray-200">Shot Planner</h2>
+        <div>
+          <h2 className="text-sm font-bold text-gray-200">Shot Planner</h2>
+          <p className="text-[9px] text-gray-600 mt-0.5">Click any trace to draw a custom waveform</p>
+        </div>
         <button
           onClick={onClose}
           className="text-gray-500 hover:text-gray-300 transition-colors cursor-pointer text-lg"
@@ -331,7 +352,16 @@ export default function ShotPlanner({
                 <label className="text-[10px] text-gray-500 uppercase tracking-wider">
                   {param.label}
                 </label>
-                <WaveformSparkline waveform={waveform} color={color} />
+                <button
+                  onClick={() => setDrawingParam(param.key)}
+                  className="relative cursor-pointer hover:opacity-100 opacity-70 transition-opacity hover:ring-1 hover:ring-cyan-600 rounded group"
+                  title="Click to draw waveform"
+                >
+                  <span className="absolute -top-1 -right-1 text-[7px] text-cyan-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                    ✎
+                  </span>
+                  <WaveformSparkline waveform={waveform} color={color} />
+                </button>
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <input
@@ -394,6 +424,32 @@ export default function ShotPlanner({
           ▶ Run Discharge
         </button>
       </div>
+
+      {/* Waveform drawing panel */}
+      {drawingParam && (() => {
+        const param = SCALAR_PARAMS.find(p => p.key === drawingParam)
+        if (!param || !baseProgram) return null
+        const baseWf = baseProgram[param.waveformKey] as WaveformPoint[]
+        if (!baseWf || baseWf.length < 2) return null
+        const effectiveWf = getEffectiveWaveform(param)
+        return (
+          <WaveformDrawer
+            waveform={effectiveWf}
+            baseWaveform={baseWf}
+            duration={effectiveDuration}
+            label={param.label}
+            unit={param.unit}
+            color={paramColors[param.key] ?? '#94a3b8'}
+            min={param.min}
+            max={param.max}
+            onSave={(wf) => {
+              onOverridesChange({ ...overrides, [param.key]: wf })
+              setDrawingParam(null)
+            }}
+            onClose={() => setDrawingParam(null)}
+          />
+        )
+      })()}
     </div>
   )
 }

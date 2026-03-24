@@ -1,6 +1,6 @@
-# Tok-Sym Architecture Guide
+# fusionsimulator.io Architecture Guide
 
-A comprehensive reference for the Tok-Sym fusion simulator codebase. This document
+A comprehensive reference for the fusionsimulator.io codebase. This document
 covers every directory, file, module, and major function in the project.
 
 **Codebase size:** ~5,500 lines Rust + ~11,600 lines TypeScript/React
@@ -47,7 +47,7 @@ covers every directory, file, module, and major function in the project.
 
 ## Project Overview
 
-Tok-Sym is an interactive, real-time tokamak plasma simulator that runs entirely in
+fusionsimulator.io is an interactive, real-time tokamak plasma simulator that runs entirely in
 the browser. A Rust physics engine compiled to WebAssembly computes plasma equilibrium,
 transport, profiles, and disruption physics. A React/TypeScript frontend renders
 2D cross-sections, time traces, radial profiles, 3D port views, and a full control
@@ -1088,4 +1088,4 @@ in the application.
 
 *This document is maintained alongside the codebase. Last updated: March 2026.*
 
-*Tok-Sym is developed by Daniel Burgess and the Columbia Fusion Research Center.*
+*fusionsimulator.io is developed by Daniel Burgess and the Columbia Fusion Research Center.*

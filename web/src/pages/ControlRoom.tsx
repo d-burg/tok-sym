@@ -50,7 +50,7 @@ export default function ControlRoom() {
   const [activeSpeed, setActiveSpeed] = useState(1.0)
 
   // Persistent Shot Planner state — survives open/close of the drawer
-  const [plannerOverrides, setPlannerOverrides] = useState<Record<string, number | null>>({})
+  const [plannerOverrides, setPlannerOverrides] = useState<Record<string, number | import('../lib/wasm').WaveformPoint[] | null>>({})
   const [plannerDuration, setPlannerDuration] = useState<number | null>(null)
   const [plannerPreset, setPlannerPreset] = useState<PresetId>(routePreset)
   const [hasCustomProgram, setHasCustomProgram] = useState(false)

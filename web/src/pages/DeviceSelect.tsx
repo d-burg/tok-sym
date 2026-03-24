@@ -203,6 +203,19 @@ export default function DeviceSelect() {
           </Link>
         </div>
 
+        {/* Contribute */}
+        <p className="text-gray-600 text-[11px]">
+          Interested in contributing?{' '}
+          <a
+            href="https://github.com/d-burg/fusion-sim"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-cyan-600 hover:text-cyan-400 transition-colors"
+          >
+            View the project on GitHub
+          </a>
+        </p>
+
         {/* Attribution */}
         <p className="text-gray-600 text-[11px]">
           &copy; 2026 Daniel Burgess and the Columbia Fusion Research Center

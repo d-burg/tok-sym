@@ -1,7 +1,7 @@
-# Tok-Sym
+# fusionsimulator.io
 
 A real-time tokamak plasma simulator that runs entirely in the browser.
-Tok-Sym combines a Rust physics engine (compiled to WebAssembly) with a
+fusionsimulator.io combines a Rust physics engine (compiled to WebAssembly) with a
 React/TypeScript frontend to provide an interactive control room experience
 for exploring tokamak plasma behavior.
 
@@ -39,7 +39,7 @@ The simulator implements peer-reviewed physics models from the fusion literature
 
 For complete citations and equations, see the in-app Bibliography page.
 
-> **Disclaimer:** Tok-Sym uses 0D scaling laws and analytic approximations.
+> **Disclaimer:** fusionsimulator.io uses 0D scaling laws and analytic approximations.
 > It is an educational and visualization tool, not a predictive transport code.
 
 ## Getting Started
