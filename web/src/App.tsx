@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import DeviceSelect from './pages/DeviceSelect'
 import ProgramDischarge from './pages/ProgramDischarge'
 import ControlRoom from './pages/ControlRoom'
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/run/:deviceId" element={<ControlRoom />} />
         <Route path="/bibliography" element={<Bibliography />} />
       </Routes>
+      <Analytics />
     </BrowserRouter>
   )
 }
