@@ -71,7 +71,7 @@ export default function SettingsDropdown() {
           <div>
             <div className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide">View</div>
             <div className="flex rounded overflow-hidden border border-gray-700">
-              {(['classic', 'modern'] as Theme[]).map((t) => (
+              {(['classic', 'modern', 'retro'] as Theme[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTheme(t)}
