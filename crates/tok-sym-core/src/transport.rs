@@ -358,6 +358,18 @@ impl TransportModel {
             self.tau_e *= 1.35;
         }
 
+        // Negative triangularity confinement enhancement.
+        // NT plasmas have reduced turbulent transport at the edge, giving
+        // ~20-40% better energy confinement than matched PT H-modes.
+        // (Austin et al., PRL 122 (2019); Marinoni et al., Nucl. Fusion 2021)
+        // CENTAUR is designed to exploit this with δ = -0.55.
+        let delta_avg = (device.delta_upper + device.delta_lower) / 2.0;
+        if delta_avg < -0.2 && self.in_hmode {
+            // Scale: 1.0 at δ=0, up to 1.4 at δ=-0.55
+            let nt_boost = 1.0 + (delta_avg.abs() / 0.55).min(1.0) * 0.4;
+            self.tau_e *= nt_boost;
+        }
+
         // Confinement mode multiplier: L-mode = 0.5 (IPB98 is H-mode reference), H-mode = 1.0
         self.tau_e *= self.h_factor;
         self.tau_e = self.tau_e.max(0.001);
@@ -519,10 +531,10 @@ impl TransportModel {
             0.0
         };
         // Clamp to the Troyon no-wall limit (βN ~ 4 with ideal wall).
-        // Use a soft rate limiter (0.3/step) only to prevent numerical spikes
-        // during very fast transients, not to constrain steady-state physics.
-        let max_rise = self.beta_n + 0.3;
-        self.beta_n = raw_beta_n.min(4.0).min(max_rise);
+        // Use a soft rate limiter to prevent numerical spikes during fast
+        // transients (especially Ip rampdown where β_N ∝ 1/Ip can spike).
+        let max_rise = self.beta_n + 0.05;  // tighter rise limit per step
+        self.beta_n = raw_beta_n.min(4.0).min(max_rise).max(0.0);
     }
 }
 
@@ -660,7 +672,8 @@ mod tests {
         // Verify the alpha heating formula produces correct power levels for
         // ITER-class DT plasmas by pre-loading the transport state to
         // fusion-relevant conditions, then stepping once to compute p_alpha.
-        let device = devices::iter();
+        let mut device = devices::iter();
+        device.mass_number = 2.5; // DT fuel required for alpha heating
         let mut transport = TransportModel::default();
 
         // Pre-load state: ITER H-mode flat-top conditions

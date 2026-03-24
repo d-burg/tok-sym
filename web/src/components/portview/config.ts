@@ -40,7 +40,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       // Midplane: wide rectangular ports + RF antenna housings, densely packed
       // Upper/lower (±55°): vertically-oriented racetracks + circles, 20 each
       type Port = { theta: number; phi: number; radius: number; zRadius?: number;
-        shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number }
+        shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number; texture?: 'dark' | 'rf' }
       const ports: Port[] = []
 
       // ── Midplane band (theta ≈ -5°, shifted down slightly): dense tall rectangles ──
@@ -301,7 +301,7 @@ export const DEFAULT_OPACITY_SCALE = 0.10
 // Per-machine power scaling for strike point glow.
 // Hierarchy: ITER (highest heat flux) > CENTAUR > JET > DIII-D (most subtle)
 export const DEVICE_POWER_SCALE: Record<string, number> = {
-  diiid: 0.04,     // very subtle — low-power research tokamak
+  diiid: 0.02,     // barely perceptible — low-power research tokamak
   centaur: 3.0,    // dazzling — high-field D-T breakeven, intense divertor load
   iter: 5.0,       // most dazzling — 500 MW fusion, extreme divertor heat flux
   sparc: 0.8,
@@ -318,12 +318,12 @@ export interface GlowTuning {
 }
 
 export const DEVICE_GLOW_TUNING: Record<string, GlowTuning> = {
-  // DIII-D: very subtle — faint warm glow, barely perceptible
+  // DIII-D: barely perceptible — faintest hint of warm glow
   diiid: {
     color: { r: 1.0, g: 0.45, b: 0.15 },      // warm orange
-    jitterAmplitude: 0.002,
-    flickerDepth: 0.10,
-    pointSize: 0.12,
+    jitterAmplitude: 0.001,
+    flickerDepth: 0.05,
+    pointSize: 0.08,
   },
   // CENTAUR: dazzling — 30 MW ICRH into compact NT plasma, intense divertor load
   centaur: {

@@ -234,7 +234,27 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       strikeStableFramesRef.current = 0
     }
 
-    if (!snapshot) return
+    if (!snapshot) {
+      // Simulation was reset or preset switched — clear all plasma visuals.
+      // This prevents frozen glow/plasma from lingering when e.g. switching DD→DT.
+      glowIntensityRef.current = 0
+      frozenStrikePointsRef.current = []
+      peakIpRef.current = 0
+      peakStableFramesRef.current = 0
+      flatTopReachedRef.current = false
+      prevStrikeFingerprint.current = ''
+      strikeStableFramesRef.current = 0
+      // Clear glow sprites and wall illumination
+      if (state.glowSystem) {
+        state.glowSystem.update([], 0, { axisR: 0, deviceId: '' })
+      }
+      if (state.wallMaterial) {
+        updateStrikePoints(state.wallMaterial, [])
+      }
+      // Hide plasma mesh
+      if (state.plasmaMesh) state.plasmaMesh.visible = false
+      return
+    }
 
     getPortConfig(deviceId, deviceR0, deviceA)
     const opacityScale = DEVICE_OPACITY_SCALE[deviceId ?? ''] ?? DEFAULT_OPACITY_SCALE

@@ -9,7 +9,7 @@ import {
 } from '../lib/wasm'
 
 // ── Preset metadata ──────────────────────────────────────────────
-const PRESETS: { id: PresetId; name: string; desc: string; color: string }[] = [
+const ALL_PRESETS: { id: PresetId; name: string; desc: string; color: string }[] = [
   {
     id: 'hmode',
     name: 'Standard H-mode',
@@ -29,6 +29,26 @@ const PRESETS: { id: PresetId; name: string; desc: string; color: string }[] = [
     color: 'red',
   },
 ]
+
+// CENTAUR uses negative-triangularity edge mode, not conventional H/L-mode
+const CENTAUR_PRESETS: typeof ALL_PRESETS = [
+  {
+    id: 'hmode',
+    name: 'NT-edge',
+    desc: 'Negative-triangularity edge mode — ELM-free high confinement',
+    color: 'cyan',
+  },
+  {
+    id: 'density_limit',
+    name: 'Density Limit',
+    desc: 'Over-fuelled shot — pushes past the Greenwald limit. Will it disrupt?',
+    color: 'red',
+  },
+]
+
+function getPresets(deviceId: string) {
+  return deviceId === 'centaur' ? CENTAUR_PRESETS : ALL_PRESETS
+}
 
 // ── Mini sparkline SVG for a waveform ────────────────────────────
 function Sparkline({
@@ -141,7 +161,7 @@ export default function ProgramDischarge() {
 
       {/* Preset selector */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full mb-8">
-        {PRESETS.map((p) => {
+        {getPresets(deviceId ?? '').map((p) => {
           const isSelected = p.id === selected
           const borderClass =
             p.color === 'cyan'

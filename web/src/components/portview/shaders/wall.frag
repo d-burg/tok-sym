@@ -242,12 +242,12 @@ void main() {
                               - (1.0 - smoothstep(0.94, 1.0, clusterFract));
         ridge *= (1.0 - clusterGap);
 
-        // Very dark matte gray base
-        vec3 rfBase = vec3(0.022, 0.024, 0.026);
-        // Ridge — slightly lighter but still very matte
-        vec3 rfRidge = vec3(0.048, 0.052, 0.056);
-        // Barely perceptible view-angle highlight
-        float rfSheen = pow(NdotV, 4.0) * 0.015;
+        // Near-black matte base
+        vec3 rfBase = vec3(0.016, 0.017, 0.019);
+        // Ridge — very subtle lighter matte
+        vec3 rfRidge = vec3(0.038, 0.040, 0.044);
+        // Almost imperceptible view-angle highlight
+        float rfSheen = pow(NdotV, 5.0) * 0.008;
 
         vec3 rfColor = mix(rfBase, rfRidge, ridge) + vec3(rfSheen * ridge);
 

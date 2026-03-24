@@ -21,11 +21,20 @@ const DEVICE_LIMITERS: Record<string, [number, number][]> = {
   iter: ITER_LIMITER,
 }
 
-const PRESETS: { id: PresetId; label: string }[] = [
-  { id: 'hmode', label: 'H-mode' },
-  { id: 'lmode', label: 'L-mode' },
-  { id: 'density_limit', label: 'Density limit' },
-]
+function getPresets(deviceId: string): { id: PresetId; label: string }[] {
+  if (deviceId === 'centaur') {
+    // CENTAUR operates in negative-triangularity edge mode; no conventional L-mode
+    return [
+      { id: 'hmode', label: 'NT-edge' },
+      { id: 'density_limit', label: 'Density limit' },
+    ]
+  }
+  return [
+    { id: 'hmode', label: 'H-mode' },
+    { id: 'lmode', label: 'L-mode' },
+    { id: 'density_limit', label: 'Density limit' },
+  ]
+}
 
 export default function ControlRoom() {
   const { deviceId: routeDeviceId } = useParams<{ deviceId: string }>()
@@ -140,7 +149,7 @@ export default function ControlRoom() {
 
           {/* Preset selector as button group */}
           <div className="flex rounded overflow-hidden border border-gray-700">
-            {PRESETS.map((p) => (
+            {getPresets(activeDevice).map((p) => (
               <button
                 key={p.id}
                 onClick={() => handlePresetChange(p.id)}

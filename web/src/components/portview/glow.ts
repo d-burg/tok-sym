@@ -191,7 +191,7 @@ export function createGlowGroup(cfg: PortConfig, tuning?: GlowTuning): GlowGroup
     // The offset must exceed the wall mesh thickness at the divertor (~5cm
     // from triangulation) plus the point sprite half-size.
     const axisR = params.axisR
-    const INWARD_OFFSET = 0.10  // metres toward plasma center
+    const INWARD_OFFSET = 0.03  // metres toward plasma center (just enough to clear z-fighting)
 
     for (let vi = 0; vi < activeCount; vi++) {
       // Subtle R/Z position jitter — fast-evolving for heat-shimmer effect
