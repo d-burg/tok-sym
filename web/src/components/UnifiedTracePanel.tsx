@@ -22,7 +22,7 @@ interface TraceConfig {
 
 const ALL_TRACES: TraceConfig[] = [
   { key: 'ip',               label: 'Iₚ',        unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
-  { key: 'beta_n',           label: 'βₙ',        unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
+  { key: 'beta_n',           label: 'βN',        unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
   { key: 'li',               label: 'lᵢ',        unit: '',         color: '#38bdf8', yMin: 0, yMax: 1.5 },
   { key: 'd_alpha',          label: 'Dα',        unit: 'a.u.',     color: '#fb7185' },
   { key: 'q95',              label: 'q₉₅',       unit: '',         color: '#a78bfa', yMax: 10 },
@@ -79,6 +79,7 @@ export default function UnifiedTracePanel({
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { theme } = useSettings()
   const isModern = theme === 'modern'
+  const isRetro = theme === 'retro'
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -144,7 +145,7 @@ export default function UnifiedTracePanel({
     const ROW_H = H / numTraces
 
     // Clear
-    ctx.fillStyle = isModern ? '#08080a' : '#0a0e17'
+    ctx.fillStyle = isRetro ? '#000000' : isModern ? '#08080a' : '#0a0e17'
     ctx.fillRect(0, 0, W, H)
 
     const plotW = W - MARGIN_LEFT - MARGIN_RIGHT
@@ -160,18 +161,46 @@ export default function UnifiedTracePanel({
       const h = ROW_H - MARGIN_TOP - MARGIN_BOTTOM
 
       // Row background
-      ctx.fillStyle = isModern
-        ? (row % 2 === 0 ? '#0a0a0d' : '#0e0e11')
-        : (row % 2 === 0 ? '#0d1117' : '#111827')
+      if (isRetro) {
+        ctx.fillStyle = '#000000'
+      } else {
+        ctx.fillStyle = isModern
+          ? (row % 2 === 0 ? '#0a0a0d' : '#0e0e11')
+          : (row % 2 === 0 ? '#0d1117' : '#111827')
+      }
       ctx.fillRect(0, row * ROW_H, W, ROW_H)
 
       // Row separator
-      ctx.strokeStyle = isModern ? 'rgba(255,255,255,0.06)' : '#1f2937'
+      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.25)' : isModern ? 'rgba(255,255,255,0.06)' : '#1f2937'
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(MARGIN_LEFT, (row + 1) * ROW_H)
       ctx.lineTo(W - MARGIN_RIGHT, (row + 1) * ROW_H)
       ctx.stroke()
+
+      // Retro mode: white grid lines (like DIII-D control room oscilloscopes)
+      if (isRetro) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+        ctx.lineWidth = 0.5
+        // Vertical grid: ~6 divisions across the time axis
+        const nVert = 6
+        for (let g = 1; g < nVert; g++) {
+          const gx = MARGIN_LEFT + (g / nVert) * plotW
+          ctx.beginPath()
+          ctx.moveTo(gx, row * ROW_H)
+          ctx.lineTo(gx, (row + 1) * ROW_H)
+          ctx.stroke()
+        }
+        // Horizontal grid: 4 divisions per row
+        const nHoriz = 4
+        for (let g = 1; g < nHoriz; g++) {
+          const gy = row * ROW_H + (g / nHoriz) * ROW_H
+          ctx.beginPath()
+          ctx.moveTo(MARGIN_LEFT, gy)
+          ctx.lineTo(MARGIN_LEFT + plotW, gy)
+          ctx.stroke()
+        }
+      }
 
       // ── Compute Y range ──
       let vMin = Infinity
@@ -230,6 +259,31 @@ export default function UnifiedTracePanel({
 
       const toY = (v: number) => y0 + h - ((v - vMin) / (vMax - vMin)) * h
 
+      // ── Retro mode: remap trace colors to DIII-D control room palette ──
+      // Mostly green, with yellow and blue accents for key traces
+      const RETRO_COLORS: Record<string, string> = {
+        ip: '#33ff33',           // green
+        beta_n: '#ffff33',       // yellow
+        li: '#33ff33',           // green
+        d_alpha: '#33ff33',      // green
+        q95: '#33ccff',          // blue
+        h_factor: '#ffff33',     // yellow
+        f_greenwald: '#ff6633',  // orange-red (warning trace)
+        ne_bar: '#33ccff',       // blue
+        ne_ped: '#3399ff',       // blue
+        te0: '#ffff33',          // yellow
+        te_ped: '#ffcc33',       // yellow
+        ne_line: '#33ccff',      // blue
+        w_th: '#33ff33',         // green
+        p_input: '#ffff33',      // yellow
+        p_rad: '#ff6633',        // orange-red
+        p_loss: '#ffcc33',       // yellow
+        v_loop: '#33ff33',       // green
+        impurity_fraction: '#33ff33', // green
+        disruption_risk: '#ff3333',   // red
+      }
+      const traceColor = isRetro ? (RETRO_COLORS[cfg.key] ?? '#33ff33') : cfg.color
+
       // ── Clip to row bounds so clamped traces don't bleed ──
       ctx.save()
       ctx.beginPath()
@@ -238,7 +292,7 @@ export default function UnifiedTracePanel({
 
       // ── Draw target trace (dashed, 50% opacity) ──
       if (targetPts && targetPts.length >= 2) {
-        ctx.strokeStyle = cfg.color
+        ctx.strokeStyle = traceColor
         ctx.lineWidth = 1.5
         ctx.globalAlpha = 0.35
         ctx.setLineDash([6, 4])
@@ -256,8 +310,8 @@ export default function UnifiedTracePanel({
 
       // ── Draw actual trace (solid) ──
       if (history.length >= 2) {
-        ctx.strokeStyle = cfg.color
-        ctx.lineWidth = 2
+        ctx.strokeStyle = traceColor
+        ctx.lineWidth = isRetro ? 1.5 : 2
         ctx.globalAlpha = 0.95
 
         // For D-alpha, detect ELM spikes (point >> both neighbors) and render
@@ -298,8 +352,8 @@ export default function UnifiedTracePanel({
       ctx.restore()
 
       // ── Label ──
-      ctx.fillStyle = cfg.color
-      ctx.font = 'bold 11px monospace'
+      ctx.fillStyle = traceColor
+      ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : 'bold 11px monospace'
       ctx.textAlign = 'right'
       ctx.textBaseline = 'middle'
       ctx.fillText(cfg.label, MARGIN_LEFT - 8, y0 + h / 2)
@@ -321,8 +375,8 @@ export default function UnifiedTracePanel({
       }
       if (displayIdx >= 0 && displayIdx < history.length) {
         const val = vals[displayIdx]
-        ctx.fillStyle = cfg.color
-        ctx.font = '11px monospace'
+        ctx.fillStyle = traceColor
+        ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : '11px monospace'
         ctx.textAlign = 'left'
         ctx.textBaseline = 'middle'
         const unitStr = cfg.unit ? ` ${cfg.unit}` : ''
@@ -407,7 +461,7 @@ export default function UnifiedTracePanel({
       const x = toX(t)
       ctx.fillText(`${t.toFixed(0)}`, x, totalH - 12)
     }
-  }, [history, duration, targets, scrubTime, elmActive, activeTraces, isModern])
+  }, [history, duration, targets, scrubTime, elmActive, activeTraces, isModern, isRetro])
 
   // Redraw on data changes
   useEffect(() => {

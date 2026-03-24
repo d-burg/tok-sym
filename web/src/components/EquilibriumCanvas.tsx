@@ -24,6 +24,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
   const containerRef = useRef<HTMLDivElement>(null)
   const { theme } = useSettings()
   const isModern = theme === 'modern'
+  const isRetro = theme === 'retro'
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -46,7 +47,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     const H = rect.height
 
     // Clear
-    ctx.fillStyle = isModern ? '#08080a' : '#0a0e17'
+    ctx.fillStyle = isRetro ? '#000000' : isModern ? '#08080a' : '#0a0e17'
     ctx.fillRect(0, 0, W, H)
 
     // Use limiter as wall boundary when provided, otherwise parse wallJson
@@ -129,9 +130,15 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
         const contour = surfaces[i]
         if (contour.points.length < 3) continue
         const t = nSurf > 1 ? i / (nSurf - 1) : 0.5
-        ctx.strokeStyle = fluxColor(t)
-        ctx.lineWidth = 1.2
-        ctx.globalAlpha = 0.7
+        if (isRetro) {
+          // Green contours, brighter toward the core
+          const g = Math.round(100 + (1 - t) * 155)
+          ctx.strokeStyle = `rgb(0,${g},0)`
+        } else {
+          ctx.strokeStyle = fluxColor(t)
+        }
+        ctx.lineWidth = isRetro ? 1.0 : 1.2
+        ctx.globalAlpha = isRetro ? 0.8 : 0.7
         drawContour(ctx, contour, toX, toY, jumpThresh)
       }
       ctx.globalAlpha = 1.0
@@ -144,17 +151,24 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       buildWallPath()
       ctx.clip()
 
-      ctx.strokeStyle = '#facc15' // bright yellow
-      ctx.lineWidth = 2
-      ctx.shadowColor = '#facc15'
-      ctx.shadowBlur = 6
+      if (isRetro) {
+        ctx.strokeStyle = '#33ff33'
+        ctx.lineWidth = 2
+        ctx.shadowColor = '#33ff33'
+        ctx.shadowBlur = 4
+      } else {
+        ctx.strokeStyle = '#facc15' // bright yellow
+        ctx.lineWidth = 2
+        ctx.shadowColor = '#facc15'
+        ctx.shadowBlur = 6
+      }
       drawContour(ctx, snapshot.separatrix, toX, toY, jumpThresh)
       ctx.shadowBlur = 0
       ctx.restore()
     }
 
     // --- Draw wall outline ---
-    ctx.strokeStyle = '#6b7280'
+    ctx.strokeStyle = isRetro ? '#555555' : '#6b7280'
     ctx.lineWidth = 2
     buildWallPath()
     ctx.stroke()
@@ -178,13 +192,13 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       }
       const ax = toX(axisR)
       const ay = toY(axisZ)
-      ctx.fillStyle = '#f97316'
+      ctx.fillStyle = isRetro ? '#33ff33' : '#f97316'
       ctx.beginPath()
       ctx.arc(ax, ay, 4, 0, Math.PI * 2)
       ctx.fill()
 
       // Crosshair
-      ctx.strokeStyle = '#f97316'
+      ctx.strokeStyle = isRetro ? '#33ff33' : '#f97316'
       ctx.lineWidth = 1
       ctx.globalAlpha = 0.5
       ctx.beginPath()
@@ -200,7 +214,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     const drawXMark = (r: number, z: number) => {
       const xp = toX(r)
       const yp = toY(z)
-      ctx.strokeStyle = '#ef4444'
+      ctx.strokeStyle = isRetro ? '#ffff33' : '#ef4444'
       ctx.lineWidth = 2
       const s = 5
       ctx.beginPath()
@@ -241,7 +255,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     while (rTick <= rMax + rStep * 0.01) {
       const x = toX(rTick)
       // Faint vertical grid line
-      ctx.strokeStyle = 'rgba(255,255,255,0.04)'
+      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)'
       ctx.beginPath()
       ctx.moveTo(x, toY(zMax))
       ctx.lineTo(x, bottomEdge)
@@ -269,7 +283,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     while (zTick <= zMax + zStep * 0.01) {
       const y = toY(zTick)
       // Faint horizontal grid line
-      ctx.strokeStyle = 'rgba(255,255,255,0.04)'
+      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)'
       ctx.beginPath()
       ctx.moveTo(leftEdge, y)
       ctx.lineTo(toX(rMax), y)
@@ -301,36 +315,38 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     ctx.restore()
 
     // --- Labels ---
-    ctx.fillStyle = '#9ca3af'
-    ctx.font = '11px monospace'
+    const labelColor = isRetro ? '#1a801a' : '#9ca3af'
+    const labelHighlight = isRetro ? '#33ff33' : '#22d3ee'
+    ctx.fillStyle = labelColor
+    ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : '11px monospace'
     ctx.textAlign = 'left'
     if (snapshot) {
       const labelX = 8
       let labelY = H - 22
       ctx.fillText(`q₉₅ = ${snapshot.q95.toFixed(2)}`, labelX, labelY)
       labelY -= 16
-      ctx.fillText(`βₙ = ${snapshot.beta_n.toFixed(2)}`, labelX, labelY)
+      ctx.fillText(`βN = ${snapshot.beta_n.toFixed(2)}`, labelX, labelY)
       labelY -= 16
       if (snapshot.in_hmode) {
-        ctx.fillStyle = '#22d3ee'
+        ctx.fillStyle = labelHighlight
         ctx.fillText('H-mode', labelX, labelY)
       } else {
-        ctx.fillStyle = '#9ca3af'
+        ctx.fillStyle = labelColor
         ctx.fillText('L-mode', labelX, labelY)
       }
       labelY -= 16
-      ctx.fillStyle = '#9ca3af'
+      ctx.fillStyle = labelColor
       ctx.fillText(`Bₜ = ${snapshot.bt.toFixed(2)} T`, labelX, labelY)
       labelY -= 16
       if (snapshot.is_limited) {
-        ctx.fillStyle = '#f59e0b'
+        ctx.fillStyle = isRetro ? '#ccaa00' : '#f59e0b'
         ctx.fillText('Limited', labelX, labelY)
       } else {
         ctx.fillStyle = '#6b7280'
         ctx.fillText('Diverted', labelX, labelY)
       }
     }
-  }, [snapshot, wallJson, limiterPoints, isModern])
+  }, [snapshot, wallJson, limiterPoints, isModern, isRetro])
 
   // Redraw on data change
   useEffect(() => {

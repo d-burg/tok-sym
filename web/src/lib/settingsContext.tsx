@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 
-export type Theme = 'classic' | 'modern'
+export type Theme = 'classic' | 'modern' | 'retro'
 export type Units = 'metric' | 'imperial'
 
 interface Settings {

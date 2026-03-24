@@ -28,6 +28,22 @@ body {
   min-height: 100vh;
 }
 
+/* ── Global small-text readability boost ─────────────────────── */
+/* Bump the smallest text sizes up by 1–2px and ensure adequate contrast */
+.text-\[9px\] {
+  font-size: 10px !important;
+}
+.text-\[10px\] {
+  font-size: 11px !important;
+}
+/* Ensure small gray labels are legible against dark backgrounds */
+.text-gray-500 {
+  color: #9ca3af;
+}
+.text-gray-600 {
+  color: #6b7280;
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════
    MODERN THEME — KALDERA-inspired monochrome
@@ -290,10 +306,10 @@ body {
 
 /* ── TEXT REFINEMENTS ────────────────────────────────────────── */
 [data-theme="modern"] .text-gray-500 {
-  color: #52525b;
+  color: #71717a;
 }
 [data-theme="modern"] .text-gray-600 {
-  color: #3f3f46;
+  color: #52525b;
 }
 
 /* Wider tracking on small labels */
@@ -386,6 +402,288 @@ body {
 }
 [data-theme="modern"] .focus\:border-cyan-500:focus {
   border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RETRO THEME — 1990s National Lab Control Room
+   Activated via [data-theme="retro"] on <html>
+
+   Design language: black backgrounds, white grid lines, green/yellow/
+   blue traces on oscilloscope-style panels. VCR OSD Mono font.
+   Modeled after the DIII-D National Fusion Facility control room
+   circa 1992–2005: Sony CRT monitors, dark rooms, green traces.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.cdnfonts.com/css/vcr-osd-mono');
+
+/* ---------- Colour palette ---------- */
+[data-theme="retro"] {
+  --bg-primary: #000000;
+  --bg-panel: #050505;
+  --bg-card: #0a0a0a;
+  --border: #333333;
+  --border-bright: #555555;
+  --accent: #33ff33;
+  --accent-dim: #1a801a;
+  --accent-warm: #ccaa00;
+  --danger: #ff3333;
+  --text-primary: #33ff33;
+  --text-secondary: #1a801a;
+}
+
+/* ---------- Typography ---------- */
+[data-theme="retro"] body {
+  font-family: 'VCR OSD Mono', 'Courier New', 'Lucida Console', monospace;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  text-rendering: optimizeSpeed;
+  /* VCR OSD Mono is thin — simulate bold with a subtle text-shadow */
+  text-shadow: 0.3px 0 0 currentColor;
+}
+
+[data-theme="retro"] .font-mono {
+  font-family: 'VCR OSD Mono', 'Courier New', 'Lucida Console', monospace;
+}
+
+/* Make retro small text more legible */
+[data-theme="retro"] .text-gray-500 { color: #1a9a1a; }
+[data-theme="retro"] .text-gray-600 { color: #147014; }
+[data-theme="retro"] .tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Page background ---------- */
+[data-theme="retro"] .bg-\[\#0a0e17\] {
+  background-color: var(--bg-primary);
+}
+
+/* ── PANEL CARDS ─────────────────────────────────────────────── */
+[data-theme="retro"] .bg-gray-900.border.border-gray-700.rounded-lg {
+  background: #000000;
+  border: 2px solid var(--border);
+  border-top-color: var(--border-bright);
+  border-left-color: var(--border-bright);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Remove the modern corner brackets & scan-line pseudo-elements */
+[data-theme="retro"] .bg-gray-900.border.border-gray-700.rounded-lg::before,
+[data-theme="retro"] .bg-gray-900.border.border-gray-700.rounded-lg::after {
+  display: none;
+}
+
+/* CRT scan-line overlay — subtle horizontal lines */
+[data-theme="retro"]::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.08) 3px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+}
+/* No vignette — DIII-D panels are flat black */
+[data-theme="retro"]::before {
+  display: none;
+}
+
+/* ── TOP BAR ─────────────────────────────────────────────────── */
+[data-theme="retro"] .border-b.border-gray-800 {
+  border-color: var(--border);
+  background: #0a0a0a;
+}
+
+/* ── SECTION DIVIDERS ────────────────────────────────────────── */
+[data-theme="retro"] .border-t.border-gray-800 {
+  border-color: #333333;
+}
+[data-theme="retro"] .border-gray-800\/50 {
+  border-color: rgba(51, 51, 51, 0.5);
+}
+
+/* ── BUTTONS ─────────────────────────────────────────────────── */
+[data-theme="retro"] button.bg-cyan-600 {
+  background: #1a3a1a;
+  border: 2px outset #3a5a3a;
+  border-radius: 0;
+  color: #33ff33;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 400;
+  text-shadow: 0 0 6px rgba(51, 255, 51, 0.5);
+}
+[data-theme="retro"] button.bg-cyan-600:hover {
+  background: #2a4a2a;
+  box-shadow: 0 0 8px rgba(51, 255, 51, 0.3);
+}
+[data-theme="retro"] button.bg-amber-600 {
+  background: #3a3a1a;
+  border: 2px outset #5a5a3a;
+  border-radius: 0;
+  color: #ccaa00;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px rgba(204, 170, 0, 0.4);
+}
+[data-theme="retro"] button.bg-gray-700 {
+  background: #1a1a1a;
+  border: 2px outset #3a3a3a;
+  border-radius: 0;
+  color: #33ff33;
+  text-transform: uppercase;
+}
+[data-theme="retro"] button.bg-gray-700:hover {
+  background: #2a2a2a;
+  border-color: #4a4a4a;
+}
+[data-theme="retro"] button.bg-purple-700 {
+  background: #2a1a3a;
+  border: 2px outset #4a3a5a;
+  border-radius: 0;
+  color: #cc88ff;
+}
+
+/* ── BUTTON GROUPS ───────────────────────────────────────────── */
+[data-theme="retro"] .flex.rounded.overflow-hidden.border.border-gray-700 {
+  border: 2px solid #444444;
+  border-radius: 0;
+}
+[data-theme="retro"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-800 {
+  background: #111111;
+  border: none;
+  border-right: 1px solid #333333;
+  color: #888888;
+}
+[data-theme="retro"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-800:hover {
+  background: #222222;
+  color: #33ff33;
+}
+
+/* ── POWER BARS ──────────────────────────────────────────────── */
+[data-theme="retro"] .bg-gray-800.rounded-full {
+  background: #0a0a0a;
+  border: 1px solid var(--border);
+  border-radius: 0;
+}
+[data-theme="retro"] .bg-gray-800.rounded-full .rounded-full {
+  border-radius: 0;
+}
+
+/* ── PROGRESS BAR ────────────────────────────────────────────── */
+[data-theme="retro"] .h-1\.5.bg-gray-900 {
+  background: #0a0a0a;
+}
+[data-theme="retro"] .bg-cyan-500 {
+  background-color: #33ff33 !important;
+  box-shadow: 0 0 6px rgba(51, 255, 51, 0.5);
+}
+
+/* ── SETTINGS DROPDOWN ───────────────────────────────────────── */
+[data-theme="retro"] .settings-panel {
+  background: #0a0a0a;
+  border: 2px solid #555555;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* ── TEXT COLOURS — green primary, gray secondary ────────────── */
+/* Bright elements: labels, titles, active values */
+[data-theme="retro"] .text-white { color: #33ff33; }
+[data-theme="retro"] .text-gray-200 { color: #2ecc2e; }
+[data-theme="retro"] .text-gray-300 { color: #26b026; }
+/* Secondary: parameter labels, units */
+[data-theme="retro"] .text-gray-400 { color: #1e901e; }
+/* Dim: section headers, separators — brighter than before for readability */
+[data-theme="retro"] .text-gray-500 { color: #1a9a1a; }
+[data-theme="retro"] .text-gray-600 { color: #147014; }
+[data-theme="retro"] .text-cyan-400 { color: #33ff33; }
+[data-theme="retro"] .text-cyan-300 { color: #44ff44; }
+[data-theme="retro"] .text-emerald-400 { color: #33ff33; }
+[data-theme="retro"] .text-red-400 { color: #ff3333; }
+[data-theme="retro"] .text-yellow-400 { color: #ccaa00; }
+
+/* Trace colours — desaturated to match the green phosphor feel.
+   Keep a few distinct hues but reduce saturation so nothing screams. */
+[data-theme="retro"] .text-\[\#22d3ee\] { color: #33ff33; }  /* Ip -> green */
+[data-theme="retro"] .text-\[\#fbbf24\] { color: #ccaa00; }  /* betaN -> amber */
+
+/* ── Q DISPLAY ───────────────────────────────────────────────── */
+[data-theme="retro"] .border-gray-700\/50 {
+  border-color: var(--border);
+}
+[data-theme="retro"] .bg-gray-800\/30,
+[data-theme="retro"] .bg-gray-800\/50 {
+  background: rgba(13, 20, 13, 0.5);
+}
+[data-theme="retro"] .border-emerald-500\/40 {
+  border-color: rgba(51, 255, 51, 0.4);
+}
+[data-theme="retro"] .border-cyan-500\/40 {
+  border-color: rgba(51, 255, 51, 0.3);
+}
+
+/* ── INFO POPUP ──────────────────────────────────────────────── */
+[data-theme="retro"] .bg-gray-900.border-gray-700 {
+  background: #0d140d;
+  border-color: var(--border-bright);
+}
+
+/* Glow on data values */
+[data-theme="retro"] .tabular-nums {
+  text-shadow: 0 0 4px rgba(51, 255, 51, 0.3);
+}
+
+/* ── HOVER/SELECTION STATES ──────────────────────────────────── */
+[data-theme="retro"] .hover\:border-cyan-500:hover {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 12px rgba(51, 255, 51, 0.2);
+}
+[data-theme="retro"] .hover\:shadow-cyan-500\/10:hover {
+  box-shadow: 0 0 12px rgba(51, 255, 51, 0.15);
+}
+[data-theme="retro"] .group-hover\:text-cyan-400 {
+  color: #33ff33;
+}
+[data-theme="retro"] .border-cyan-600 {
+  border-color: var(--accent-dim);
+}
+
+/* ── MODE BADGE ──────────────────────────────────────────────── */
+[data-theme="retro"] .bg-cyan-900 {
+  background: rgba(26, 60, 26, 0.5);
+  border: 1px solid var(--border);
+}
+[data-theme="retro"] .bg-red-900 {
+  background: rgba(60, 20, 20, 0.5);
+  border: 1px solid #5a2a2a;
+}
+
+/* ── FUEL TOGGLE (emerald) ───────────────────────────────────── */
+[data-theme="retro"] button.bg-emerald-600 {
+  background: #1a4a1a;
+  border: none;
+  color: #33ff33;
+  text-shadow: 0 0 6px rgba(51, 255, 51, 0.5);
+}
+
+/* ── SIGNAL BARS ─────────────────────────────────────────────── */
+[data-theme="retro"] .rounded-sm {
+  border-radius: 0;
+}
+
+/* Don't uppercase info popup body text */
+[data-theme="retro"] .info-popup-content .text-\[10px\],
+[data-theme="retro"] .info-popup-content .text-\[9px\] {
+  text-transform: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
