@@ -45,6 +45,8 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
   const flatTopReachedRef = useRef(false)
   const prevStrikeFingerprint = useRef('')
   const strikeStableFramesRef = useRef(0)
+  const prevDisruptedRef = useRef(false)
+  const disruptionFlashRef = useRef(0)  // 1.0 at disruption moment, decays to 0
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -245,20 +247,26 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       prevStrikeFingerprint.current = ''
       strikeStableFramesRef.current = 0
       // Clear glow sprites and wall illumination
-      if (state.glowSystem) {
-        state.glowSystem.update([], 0, { axisR: 0, deviceId: '' })
+      if (state.glowGroup) {
+        state.glowGroup.update({
+          strikePoints: [], intensity: 0, powerScale: 0,
+          axisR: 0, time: 0,
+        })
       }
       if (state.wallMaterial) {
         updateStrikePoints(state.wallMaterial, [])
       }
       // Hide plasma mesh
-      if (state.plasmaMesh) state.plasmaMesh.visible = false
+      if (state.plasmaGroup) state.plasmaGroup.group.visible = false
       return
     }
 
     getPortConfig(deviceId, deviceR0, deviceA)
     const opacityScale = DEVICE_OPACITY_SCALE[deviceId ?? ''] ?? DEFAULT_OPACITY_SCALE
-    const powerScale = DEVICE_POWER_SCALE[deviceId ?? ''] ?? DEFAULT_POWER_SCALE
+    const basePowerScale = DEVICE_POWER_SCALE[deviceId ?? ''] ?? DEFAULT_POWER_SCALE
+    // DD plasmas produce much less divertor heat flux — halve the glow
+    const isDT = (snapshot.mass_number ?? 2.0) > 2.0
+    const powerScale = isDT ? basePowerScale : basePowerScale * 0.5
     const glowTuning = DEVICE_GLOW_TUNING[deviceId ?? ''] ?? DEFAULT_GLOW_TUNING
 
     // Set per-device strike illumination color on wall material
@@ -276,8 +284,14 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       } catch { /* ignore */ }
     }
 
-    // Update plasma
-    if (state.plasmaGroup && pts) {
+    // Re-show plasma group if it was hidden by a previous null-snapshot clear,
+    // but keep it hidden when disrupted (plasma has terminated).
+    if (state.plasmaGroup) {
+      state.plasmaGroup.group.visible = !snapshot.disrupted
+    }
+
+    // Update plasma — skip when disrupted
+    if (state.plasmaGroup && pts && !snapshot.disrupted) {
       state.plasmaGroup.update({
         separatrix: snapshot.separatrix,
         fluxSurfaces: snapshot.flux_surfaces,
@@ -296,8 +310,8 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       })
     }
 
-    // Update glow with smooth fade in/out
-    if (state.glowGroup && pts) {
+    // Update glow with smooth fade in/out — skip when disrupted
+    if (state.glowGroup && pts && !snapshot.disrupted) {
       // ── Flat-top detection for glow activation ──
       // Glow should only appear once the equilibrium has settled at flat-top,
       // NOT during ramp-up when the separatrix strike points are still moving.
@@ -406,11 +420,45 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
       }
     }
 
-    // ELM flash — brief white overlay
-    if (snapshot.elm_active) {
+    // ── Disruption flash ──
+    // Detect the moment of disruption (transition from false → true).
+    // Trigger a bright reddish flash that decays over ~15 frames, then
+    // immediately clear all plasma/glow from the portview.
+    const isDisrupted = !!snapshot.disrupted
+    if (isDisrupted && !prevDisruptedRef.current) {
+      // Moment of disruption — trigger flash
+      disruptionFlashRef.current = 1.0
+      // Immediately clear plasma and glow
+      glowIntensityRef.current = 0
+      frozenStrikePointsRef.current = []
+      if (state.glowGroup) {
+        state.glowGroup.update({
+          strikePoints: [], intensity: 0, powerScale: 0,
+          axisR: snapshot.axis_r, time: 0,
+        })
+      }
+      if (state.wallMaterial) updateStrikePoints(state.wallMaterial, [])
+      if (state.plasmaGroup) state.plasmaGroup.group.visible = false
+    }
+    prevDisruptedRef.current = isDisrupted
+
+    // Decay the flash
+    if (disruptionFlashRef.current > 0.01) {
+      disruptionFlashRef.current *= 0.88  // exponential decay ~15 frames
+    } else {
+      disruptionFlashRef.current = 0
+    }
+
+    // Set clear color based on flash state
+    const flash = disruptionFlashRef.current
+    if (flash > 0.01) {
+      // Reddish flash: blend from bright red-orange toward dark background
+      const r = Math.floor(5 + flash * 180)
+      const g = Math.floor(5 + flash * 40)
+      const b = Math.floor(7 + flash * 20)
+      state.renderer.setClearColor(new THREE.Color(r / 255, g / 255, b / 255), 1)
+    } else if (snapshot.elm_active) {
       state.renderer.setClearColor(0x0c0c0e, 1)
-    } else if (snapshot.disrupted) {
-      state.renderer.setClearColor(0x100505, 1)
     } else {
       state.renderer.setClearColor(0x050507, 1)
     }

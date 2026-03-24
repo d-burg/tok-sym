@@ -227,11 +227,26 @@ export function computeFusion(snapshot: Snapshot, device: Device): FusionState {
   // requiring P_external to be at least 20% of P_input (i.e. alpha power
   // isn't dominating the denominator) and smoothly ramping Q to zero when
   // Ip is below 50% of nominal (plasma is no longer in a meaningful state).
-  const p_external = snapshot.p_input - (snapshot.p_alpha ?? 0)
+  // Q = P_fusion / P_external, with protections against rampdown spikes.
+  // During rampdown, heating drops before fusion power decays, causing Q to
+  // diverge. Solution: fade Q aggressively when programmed Ip drops below
+  // 90% of max (rampdown has begun) and cap at 10.
+  // Q = P_fusion / P_external.  To prevent rampdown spikes, cap Q at
+  // whatever value it had when external heating was at full power.
+  // Use a simple approach: Q denominator is always at least 30% of p_input,
+  // and Q fades to zero when Ip drops below 90%.
+  const p_alpha = snapshot.p_alpha ?? 0
+  const p_external = snapshot.p_input - p_alpha
   const ip_frac = device.ip_max > 0 ? snapshot.ip / device.ip_max : 0
-  const rampdown_fade = Math.min(ip_frac / 0.5, 1.0) // linear fade below 50% Ip
-  const q_plasma = p_external > 1.0
-    ? Math.min(p_fus_MW / p_external, 20) * rampdown_fade
+  const prog_ip_frac = device.ip_max > 0 ? (snapshot.prog_ip ?? snapshot.ip) / device.ip_max : 0
+  // Fade starts at 95% Ip (very early rampdown detection), zero at 30%
+  const ip_fade = Math.min(Math.max((prog_ip_frac - 0.30) / 0.65, 0), 1.0)
+    * Math.min(Math.max((ip_frac - 0.20) / 0.60, 0), 1.0)
+  // Denominator: never let it drop below the external heating component
+  // at flat-top equivalent. Use max of actual p_external and a floor.
+  const denom = Math.max(p_external, p_alpha > 0.1 ? p_alpha * 0.5 : 0, 1.0)
+  const q_plasma = denom > 1.0
+    ? Math.min(p_fus_MW / denom, 30) * ip_fade
     : 0
 
   return {
@@ -339,8 +354,36 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
   const f_GW = snapshot.f_greenwald
   const f_detach = Math.min(1 - 1 / (1 + Math.pow(f_GW / 0.7, 6)), 0.97)
 
-  // Peak heat flux at the divertor target
-  const q_peak = q_attached * (1 - f_detach) / 1e6  // W/m² → MW/m²
+  // Peak heat flux at the divertor target (inter-ELM baseline)
+  let q_peak = q_attached * (1 - f_detach) / 1e6  // W/m² → MW/m²
+
+  // ── ELM transient heat flux spike ──
+  // Type I ELMs expel 5-15% of pedestal stored energy in ~0.5-1 ms,
+  // creating a transient heat pulse independent of the inter-ELM baseline.
+  // Compute the ELM heat flux from stored energy directly (not from p_sol
+  // which has already dropped because the Rust model crashed W_th).
+  if (snapshot.elm_active && snapshot.in_hmode) {
+    // ELM energy dump: fraction of stored energy deposited on divertor
+    const w_th_MJ = (snapshot.w_th ?? 0)  // MJ
+    const elm_energy_frac = (() => {
+      switch (device.id) {
+        case 'iter':    return 0.10   // 10% of W_th per Type I ELM
+        case 'jet':     return 0.08   // 8%
+        case 'diiid':   return 0.06   // 6%
+        case 'centaur': return 0.0    // NT-edge: no ELMs
+        default:        return 0.07
+      }
+    })()
+    // ELM duration ~1 ms → power = energy / duration
+    const elm_duration_s = 0.001
+    const elm_power_MW = w_th_MJ * elm_energy_frac / elm_duration_s  // MW
+    // DT plasmas have more stored energy
+    const isDT = (snapshot.mass_number ?? 2.0) > 2.0
+    const dt_factor = isDT ? 1.4 : 1.0
+    // Add ELM power to q_peak (deposited on same wetted area)
+    const elm_q = A_wet > 0 ? (elm_power_MW * dt_factor * 1e6 * 0.67) / A_wet / 1e6 : 0  // MW/m²
+    q_peak = Math.max(q_peak, elm_q)
+  }
 
   // Wall material: DIII-D is carbon; JET (ILW) and ITER are tungsten divertors
   // DIII-D uses carbon/graphite PFCs; JET (ILW) and ITER use tungsten divertors

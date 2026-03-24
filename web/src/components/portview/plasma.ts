@@ -837,7 +837,9 @@ export function createPlasmaGroup(cfg: PortConfig): PlasmaGroup {
     }
 
     // ── Divertor legs ──
-    if (params.inHmode) {
+    // Show legs whenever separatrix is visible (not gated on H-mode)
+    // to prevent legs flashing independently during beta_N oscillations.
+    if (sepVertCount > 0) {
       // Legs share the same fingerprint (if contour changed, legs change too)
       if (newFP !== legFP) {
         const result = rebuildLegGeometry(

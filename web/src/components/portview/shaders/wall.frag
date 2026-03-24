@@ -196,23 +196,21 @@ void main() {
     if (shape < 0.5) {
       // Circle: simple radial test
       float ellipDist = sqrt((dz * dz) / (zR * zR) + (dtor * dtor) / (rr * rr));
-      inside = 1.0 - smoothstep(0.7, 1.0, ellipDist);
+      inside = 1.0 - smoothstep(0.92, 1.0, ellipDist);
     } else if (shape < 1.5) {
       // Square/rectangle: box distance in (dz, dtor)
       float bx = abs(dtor) / rr;
       float by = abs(dz) / zR;
       float boxDist = max(bx, by);
-      inside = 1.0 - smoothstep(0.7, 1.0, boxDist);
+      inside = 1.0 - smoothstep(0.92, 1.0, boxDist);
     } else {
       // Stadium/racetrack: rectangle with semicircle caps, vertically oriented.
-      // The straight section extends in the Z (poloidal) direction by 'ext',
-      // giving a tall narrow shape typical of DIII-D upper/lower diagnostic ports.
       float reducedZ = max(abs(dz) - ext, 0.0);
       float stadDist = sqrt((reducedZ * reducedZ) / (zR * zR) + (dtor * dtor) / (rr * rr));
       // Enforce outer bounding box
       float totalHalfH = zR + ext;
       if (abs(dz) > totalHalfH * 1.1) stadDist = 2.0;
-      inside = 1.0 - smoothstep(0.7, 1.0, stadDist);
+      inside = 1.0 - smoothstep(0.92, 1.0, stadDist);
     }
 
     if (inside > 0.01) {
@@ -225,29 +223,35 @@ void main() {
 
         // Wide ridges: angled slightly downward (mix of Z and toroidal)
         // The angle creates a slight diagonal pattern like real Faraday screens
-        float ridgeSpacing = 0.045;  // wider ridges to avoid aliasing
-        float ridgeCoord = dz + dtor * 0.3;  // angled downward
-        float ridgePhase = ridgeCoord / ridgeSpacing;
-        float ridgeFract = fract(ridgePhase);
-        // Wider, softer ridges
-        float ridge = smoothstep(0.0, 0.25, ridgeFract) * (1.0 - smoothstep(0.55, 0.80, ridgeFract));
-
-        // Cluster into 3-4 vertical sections within each port.
-        // Use toroidal position to create vertical dividers between clusters.
+        // Cluster into 3-4 vertical sub-antenna sections within each port.
         float clusterSpacing = rr * 0.55;  // ~3-4 clusters across port width
         float clusterPhase = dtor / clusterSpacing;
         float clusterFract = fract(clusterPhase + 0.5);
         // Narrow dark gap between clusters
         float clusterGap = 1.0 - smoothstep(0.0, 0.06, clusterFract)
                               - (1.0 - smoothstep(0.94, 1.0, clusterFract));
+
+        // Angled ridges that restart at each cluster boundary.
+        // Use local toroidal position within the cluster so each sub-antenna
+        // grouping starts its ridges from the same vertical baseline.
+        // Add a per-cluster phase offset (0.37 ridges) to ensure adjacent
+        // clusters never accidentally align even when the geometry allows it.
+        float clusterIndex = floor(clusterPhase + 0.5);
+        float localTor = (clusterFract - 0.5) * clusterSpacing;
+        float ridgeSpacing = 0.045;
+        float ridgeCoord = dz + localTor * 0.3;
+        float ridgePhase = ridgeCoord / ridgeSpacing + clusterIndex * 0.37;
+        float ridgeFract = fract(ridgePhase);
+        // Wider, softer ridges
+        float ridge = smoothstep(0.0, 0.25, ridgeFract) * (1.0 - smoothstep(0.55, 0.80, ridgeFract));
         ridge *= (1.0 - clusterGap);
 
-        // Near-black matte base
-        vec3 rfBase = vec3(0.016, 0.017, 0.019);
-        // Ridge — very subtle lighter matte
-        vec3 rfRidge = vec3(0.038, 0.040, 0.044);
-        // Almost imperceptible view-angle highlight
-        float rfSheen = pow(NdotV, 5.0) * 0.008;
+        // Near-black matte base — very dark, no shine
+        vec3 rfBase = vec3(0.012, 0.013, 0.015);
+        // Ridge — barely lighter, fully matte
+        vec3 rfRidge = vec3(0.030, 0.032, 0.036);
+        // Negligible view-angle highlight
+        float rfSheen = pow(NdotV, 6.0) * 0.005;
 
         vec3 rfColor = mix(rfBase, rfRidge, ridge) + vec3(rfSheen * ridge);
 
@@ -261,8 +265,8 @@ void main() {
           float rZ = max(abs(dz) - ext, 0.0);
           borderDist = sqrt((rZ*rZ)/(zR*zR) + (dtor*dtor)/(rr*rr));
         }
-        float frame = smoothstep(0.85, 0.90, borderDist) * (1.0 - smoothstep(0.93, 1.0, borderDist));
-        rfColor += vec3(0.06) * frame;
+        float frame = smoothstep(0.88, 0.92, borderDist) * (1.0 - smoothstep(0.95, 1.0, borderDist));
+        rfColor += vec3(0.02) * frame;
 
         color = mix(color, rfColor, inside);
       } else {
@@ -279,8 +283,8 @@ void main() {
           float rZ = max(abs(dz) - ext, 0.0);
           borderDist = sqrt((rZ*rZ)/(zR*zR) + (dtor*dtor)/(rr*rr));
         }
-        float rim = smoothstep(0.85, 0.92, borderDist) * (1.0 - smoothstep(0.92, 1.0, borderDist));
-        shade += rim * 0.05 * NdotV;
+        float rim = smoothstep(0.88, 0.93, borderDist) * (1.0 - smoothstep(0.95, 1.0, borderDist));
+        shade += rim * 0.02 * NdotV;
 
         color = mix(color, vec3(shade), inside);
       }

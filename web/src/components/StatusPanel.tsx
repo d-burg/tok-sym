@@ -111,15 +111,18 @@ export default function StatusPanel({
 
         {/* Profile toggle + status */}
         <div className="flex items-center gap-1.5 ml-auto shrink-0">
-          {canShowProfiles && (
-            <>
+          <>
               <button
-                onClick={() => setShowProfiles(!showProfiles)}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
-                  showProfiles
-                    ? 'bg-purple-700 text-purple-200'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                onClick={() => canShowProfiles && setShowProfiles(!showProfiles)}
+                disabled={!canShowProfiles}
+                className={`px-2.5 py-1 rounded text-[11px] font-bold tracking-wide transition-colors ${
+                  !canShowProfiles
+                    ? 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                    : showProfiles
+                      ? 'bg-purple-700 text-purple-200 cursor-pointer'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 cursor-pointer'
                 }`}
+                title={!canShowProfiles ? 'Available after discharge completes or when paused' : ''}
               >
                 {showProfiles ? 'Params' : 'Profiles'}
               </button>
@@ -145,8 +148,7 @@ export default function StatusPanel({
                   </label>
                 </>
               )}
-            </>
-          )}
+          </>
           <span className="text-[10px] text-gray-500">
             {s.status}
           </span>

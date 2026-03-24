@@ -40,6 +40,10 @@ pub struct TransportModel {
     pub beta_t: f64,
     /// Normalized beta
     pub beta_n: f64,
+    /// Peak β_N achieved (caps rampdown overshoot)
+    beta_n_peak: f64,
+    /// Peak Ip seen (for rampdown confinement degradation)
+    ip_peak: f64,
     /// Safety factor at 95% flux surface
     pub q95: f64,
     /// Greenwald fraction
@@ -89,6 +93,8 @@ impl Default for TransportModel {
             h_factor: 0.5,
             beta_t: 0.0,
             beta_n: 0.0,
+            beta_n_peak: 0.0,
+            ip_peak: 0.0,
             q95: 10.0,
             f_greenwald: 0.0,
             li: 1.0,
@@ -165,6 +171,8 @@ impl TransportModel {
             self.ne_bar = 0.01;
             self.q95 = 100.0;
             self.beta_n = 0.0;
+            self.beta_n_peak = 0.0;
+            self.ip_peak = 0.0;
             self.beta_t = 0.0;
             self.tau_e = 0.001;
             self.p_input = 0.0;
@@ -311,27 +319,42 @@ impl TransportModel {
             0.0488 * self.ne_bar.powf(0.717) * bt.powf(0.803) * surface.powf(0.941)
             * device.p_lh_factor;
 
-        // ── H-mode logic ──
+        // ── H-mode / NT-edge logic ──
         let net_heating = self.p_input - self.p_rad;
-        // Minimum density for H-mode access (low-density branch protection).
-        // Martin scaling → 0 at ne → 0, but real plasmas need sufficient density
-        // and sufficient current for proper edge transport barrier formation.
         let ne_gw = device.greenwald_density(ip);
-        let min_ne_for_hmode = 0.20 * ne_gw.max(0.5); // require ≥ 20% Greenwald (floor 0.5 for safety)
-        if !self.in_hmode {
-            // L → H transition: require sufficient power, q95, current, and density
-            if net_heating > self.p_lh_threshold && self.q95 > 2.5
-                && ip >= 0.3 * device.ip_max
-                && self.ne_bar > min_ne_for_hmode {
-                self.in_hmode = true;
-                self.h_factor = 1.0;
-                self.elm_timer = 0.0;
+        let delta_avg = (device.delta_upper + device.delta_lower) / 2.0;
+        let is_nt = delta_avg < -0.2;
+
+        if is_nt {
+            // Negative triangularity "NT-edge" mode: confinement between L-mode
+            // and H-mode, fully ELM-free. Destabilized ballooning modes increase
+            // edge transport and radiation, giving ~70% of H-mode confinement
+            // without an edge transport barrier.
+            // in_hmode stays FALSE — prevents ELMs and DT H-mode boost.
+            self.in_hmode = false;
+            let min_ne = 0.15 * ne_gw.max(0.3);
+            if ip >= 0.2 * device.ip_max && self.ne_bar > min_ne && net_heating > 0.5 {
+                // NT-edge: h_factor between L-mode (0.5) and H-mode (1.0)
+                self.h_factor = 0.82;
+            } else {
+                self.h_factor = 0.5;
             }
         } else {
-            // H → L back-transition
-            if net_heating < 0.8 * self.p_lh_threshold || self.q95 < 2.0 {
-                self.in_hmode = false;
-                self.h_factor = 0.5;
+            // Standard positive-δ H-mode via L-H power threshold
+            let min_ne_for_hmode = 0.20 * ne_gw.max(0.5);
+            if !self.in_hmode {
+                if net_heating > self.p_lh_threshold && self.q95 > 2.5
+                    && ip >= 0.3 * device.ip_max
+                    && self.ne_bar > min_ne_for_hmode {
+                    self.in_hmode = true;
+                    self.h_factor = 1.0;
+                    self.elm_timer = 0.0;
+                }
+            } else {
+                if net_heating < 0.8 * self.p_lh_threshold || self.q95 < 2.0 {
+                    self.in_hmode = false;
+                    self.h_factor = 0.5;
+                }
             }
         }
 
@@ -358,20 +381,36 @@ impl TransportModel {
             self.tau_e *= 1.35;
         }
 
-        // Negative triangularity confinement enhancement.
-        // NT plasmas have reduced turbulent transport at the edge, giving
-        // ~20-40% better energy confinement than matched PT H-modes.
-        // (Austin et al., PRL 122 (2019); Marinoni et al., Nucl. Fusion 2021)
-        // CENTAUR is designed to exploit this with δ = -0.55.
-        let delta_avg = (device.delta_upper + device.delta_lower) / 2.0;
-        if delta_avg < -0.2 && self.in_hmode {
-            // Scale: 1.0 at δ=0, up to 1.4 at δ=-0.55
-            let nt_boost = 1.0 + (delta_avg.abs() / 0.55).min(1.0) * 0.4;
+        // NT-edge confinement enhancements:
+        // 1. Reduced edge turbulence from destabilized ballooning modes
+        // 2. DT isotope effect (smaller than H-mode DT boost since no pedestal)
+        if is_nt && self.h_factor > 0.6 {
+            let nt_boost = 1.0 + (delta_avg.abs() / 0.55).min(1.0) * 0.10;
             self.tau_e *= nt_boost;
+            // DT isotope effect in NT-edge (reduced from H-mode 1.35×)
+            if device.mass_number > 2.0 {
+                self.tau_e *= 1.12;
+            }
         }
 
-        // Confinement mode multiplier: L-mode = 0.5 (IPB98 is H-mode reference), H-mode = 1.0
-        self.tau_e *= self.h_factor;
+        // Track peak Ip for rampdown detection
+        if ip > self.ip_peak {
+            self.ip_peak = ip;
+        }
+        // Rampdown confinement degradation: as Ip drops below its peak,
+        // edge transport barrier weakens and confinement degrades toward
+        // L-mode. This prevents β_N and Q from spiking during rampdown
+        // because W_th decays faster as confinement drops.
+        let mut h_eff = self.h_factor;
+        if self.ip_peak > 0.5 && ip < 0.90 * self.ip_peak {
+            // Linear degradation from current h_factor toward 0.4 (below L-mode)
+            // as Ip drops from 90% to 30% of peak
+            let ramp_frac = ((ip / self.ip_peak) - 0.30).max(0.0) / 0.60;
+            h_eff = 0.4 + (self.h_factor - 0.4) * ramp_frac;
+        }
+
+        // Confinement mode multiplier
+        self.tau_e *= h_eff;
         self.tau_e = self.tau_e.max(0.001);
 
         // ── Power balance: dW/dt = P_input - W/τ_E - P_rad ──
@@ -531,10 +570,21 @@ impl TransportModel {
             0.0
         };
         // Clamp to the Troyon no-wall limit (βN ~ 4 with ideal wall).
-        // Use a soft rate limiter to prevent numerical spikes during fast
-        // transients (especially Ip rampdown where β_N ∝ 1/Ip can spike).
-        let max_rise = self.beta_n + 0.05;  // tighter rise limit per step
-        self.beta_n = raw_beta_n.min(4.0).min(max_rise).max(0.0);
+        // Cap raw value at the peak β_N achieved so far — prevents the
+        // 1/Ip divergence during Ip rampdown when stored energy persists.
+        // Rate-limited β_N: rises via rate limiter, never exceeds peak.
+        let clamped = raw_beta_n.min(4.0);
+        let max_rise = self.beta_n + 0.10;
+        let new_beta_n = clamped.min(max_rise).max(0.0);
+        // Update peak tracker ONLY during normal operation (raw ≈ clamped).
+        // During rampdown, raw_beta_n spikes due to 1/Ip while clamped stays
+        // at the Troyon limit — don't let the peak tracker follow the spike.
+        let is_spiking = raw_beta_n > self.beta_n_peak * 1.2 && self.beta_n_peak > 0.3;
+        if new_beta_n > self.beta_n_peak && !is_spiking {
+            self.beta_n_peak = new_beta_n;
+        }
+        // Always cap at peak
+        self.beta_n = new_beta_n.min(self.beta_n_peak);
     }
 }
 

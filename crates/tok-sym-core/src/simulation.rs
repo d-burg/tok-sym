@@ -102,9 +102,9 @@ impl DischargeProgram {
         let (ip_flat, duration, p_nbi, p_ech, p_ich, ne_frac) = match device.id.as_str() {
             "iter"    => (device.ip_max, 100.0, 33.0, 20.0, 0.0, 0.80),
             "jet"     => (2.5,           20.0,  25.0,  0.0, 4.0, 0.70),
-            // CENTAUR: 9.6 MA, 10s pulse, 30 MW ICRH, fGW = 0.61
-            // NT breakeven scenario — operates ELM-free in L-mode/NT regime
-            "centaur" => (device.ip_max, 10.0,  0.0,   0.0, 30.0, 0.61),
+            // CENTAUR: 9.6 MA, 20s pulse, 30 MW ICRH, fGW = 0.65
+            // NT breakeven scenario — high-field compact DT machine
+            "centaur" => (device.ip_max, 20.0,  0.0,   0.0, 30.0, 0.65),
             _         => (device.ip_max * 0.4, 10.0, 5.0, 0.0, 0.0, 0.60),
         };
         // ITER and CENTAUR use full toroidal field; other devices typically
@@ -120,17 +120,17 @@ impl DischargeProgram {
         // JET/DIII-D: standard ramp fractions
         let (f_ramp0, f_ramp1, f_end, f_down) = match device.id.as_str() {
             "iter"    => (0.01, 0.08, 0.88, 0.95),
-            "centaur" => (0.03, 0.12, 0.85, 0.92), // fast ramp for 10s pulse
+            "centaur" => (0.02, 0.20, 0.70, 0.85), // slow ramp for high-field: ~4s up, 10s flat, ~4s down
             _         => (0.05, 0.15, 0.80, 0.90),
         };
         let (f_heat_on, f_heat_full, f_heat_off0, f_heat_off) = match device.id.as_str() {
             "iter"    => (0.10, 0.12, 0.85, 0.88),
-            "centaur" => (0.15, 0.18, 0.85, 0.92), // ICRH overlaps ramp-down
+            "centaur" => (0.18, 0.22, 0.68, 0.80), // ICRH on during flat-top, off before Ip ramp-down
             _         => (0.20, 0.25, 0.75, 0.80),
         };
         let (f_ne0, f_ne1, f_ne_end, f_ne_off) = match device.id.as_str() {
             "iter"    => (0.06, 0.12, 0.88, 0.95),
-            "centaur" => (0.08, 0.15, 0.85, 0.92),
+            "centaur" => (0.10, 0.22, 0.68, 0.82),
             _         => (0.10, 0.20, 0.80, 0.90),
         };
 
@@ -214,16 +214,21 @@ impl DischargeProgram {
     pub fn lmode(device: &Device) -> Self {
         let ip_max = device.ip_max * 0.4;
         let bt = device.bt_max * 0.9;
-        let duration = 8.0;
+        // Device-specific timing for consistent ramp rates
+        let (duration, t_ramp_start, t_ramp_end, t_flat_end, t_down) = match device.id.as_str() {
+            "centaur" => (16.0, 1.0, 4.0, 12.0, 14.0),
+            "iter"    => (50.0, 1.0, 5.0, 40.0, 47.0),
+            _         => (8.0,  0.5, 1.5, 6.0,  7.0),
+        };
         let ne_target = device.greenwald_density(ip_max) * 0.4;
 
         DischargeProgram {
             ip: vec![
                 (0.0, 0.0),
-                (0.5, ip_max * 0.3),
-                (1.5, ip_max),
-                (6.0, ip_max),
-                (7.0, ip_max * 0.5),
+                (t_ramp_start, ip_max * 0.3),
+                (t_ramp_end, ip_max),
+                (t_flat_end, ip_max),
+                (t_down, ip_max * 0.5),
                 (duration, 0.0),
             ],
             bt: vec![(0.0, bt), (duration, bt)],
@@ -267,53 +272,58 @@ impl DischargeProgram {
     pub fn density_limit(device: &Device) -> Self {
         let ip_max = device.ip_max * 0.5;
         let bt = device.bt_max * 0.9;
-        let duration = 8.0;
+        // CENTAUR needs longer duration for slower ramps (high-field machine)
+        let (duration, t_ramp_start, t_ramp_end, t_flat_end, t_down) = match device.id.as_str() {
+            "centaur" => (16.0, 1.0, 4.0, 12.0, 14.0),
+            "iter"    => (50.0, 1.0, 5.0, 40.0, 47.0),
+            _         => (8.0,  0.5, 1.5, 6.0,  7.0),
+        };
         let ne_target = device.greenwald_density(ip_max) * 1.1; // Above Greenwald!
 
         DischargeProgram {
             ip: vec![
                 (0.0, 0.0),
-                (0.5, ip_max * 0.3),
-                (1.5, ip_max),
-                (6.0, ip_max),
-                (7.0, ip_max * 0.5),
+                (t_ramp_start, ip_max * 0.3),
+                (t_ramp_end, ip_max),
+                (t_flat_end, ip_max),
+                (t_down, ip_max * 0.5),
                 (duration, 0.0),
             ],
             bt: vec![(0.0, bt), (duration, bt)],
             ne_target: vec![
                 (0.0, 0.05),
-                (1.0, ne_target * 0.3),
-                (2.5, ne_target * 0.6),
-                (4.0, ne_target), // Push above Greenwald limit
-                (6.0, ne_target),
+                (t_ramp_end * 0.7, ne_target * 0.3),
+                (t_ramp_end * 1.2, ne_target * 0.6),
+                ((t_ramp_end + t_flat_end) * 0.5, ne_target), // Push above Greenwald limit
+                (t_flat_end, ne_target),
                 (duration, 0.05),
             ],
             p_nbi: vec![
                 (0.0, 0.0),
-                (2.0, 0.0),
-                (2.5, 3.0),
-                (6.0, 3.0),
-                (7.0, 0.0),
+                (t_ramp_end * 1.1, 0.0),
+                (t_ramp_end * 1.3, 3.0),
+                (t_flat_end, 3.0),
+                (t_down, 0.0),
                 (duration, 0.0),
             ],
             p_ech: vec![(0.0, 0.0), (duration, 0.0)],
             p_ich: vec![(0.0, 0.0), (duration, 0.0)],
             kappa: vec![
                 (0.0, 1.0),
-                (1.0, device.kappa),
-                (duration - 1.0, device.kappa),
+                (t_ramp_end, device.kappa),
+                (t_flat_end, device.kappa),
                 (duration, 1.0),
             ],
             delta: vec![
                 (0.0, 0.0),
-                (1.0, device.delta_lower),
-                (duration - 1.0, device.delta_lower),
+                (t_ramp_end, device.delta_lower),
+                (t_flat_end, device.delta_lower),
                 (duration, 0.0),
             ],
             d2_puff: vec![
                 (0.0, 0.0),
-                (0.3, 3.0),
-                (2.0, 4.0),  // High gas puff pushing Greenwald limit
+                (t_ramp_start, 3.0),
+                (t_ramp_end * 1.1, 4.0),  // High gas puff pushing Greenwald limit
                 (5.0, 5.0),
                 (6.0, 3.0),
                 (7.0, 0.0),
@@ -1143,6 +1153,40 @@ mod tests {
         // stochastically disrupt. But we can at least verify the simulation ran.
         // The key test is that extreme shapes DO disrupt (next test).
         let _ = wall_disrupted;
+    }
+
+    #[test]
+    fn test_centaur_peak_values() {
+        let device = devices::centaur();
+        let program = DischargeProgram::standard_hmode(&device);
+        let duration = program.duration;
+        let mut sim = Simulation::new(device, program);
+        sim.start();
+
+        let dt = 0.002;
+        let n_steps = (duration / dt) as usize + 10;
+        let mut peak_beta_n = 0.0_f64;
+        let mut peak_te0 = 0.0_f64;
+        let mut peak_tau_e = 0.0_f64;
+        let mut step_count = 0;
+        for _ in 0..n_steps {
+            let snap = sim.step(dt);
+            peak_beta_n = peak_beta_n.max(snap.beta_n);
+            peak_te0 = peak_te0.max(snap.te0);
+            peak_tau_e = peak_tau_e.max(snap.tau_e);
+            step_count += 1;
+            if step_count % 1000 == 0 {
+                eprintln!("  t={:.1}s: beta_N={:.2}, Te0={:.1}, tau_E={:.2}, ip={:.1}, hmode={}, q95={:.1}",
+                    snap.time, snap.beta_n, snap.te0, snap.tau_e, snap.ip, snap.in_hmode, snap.q95);
+            }
+            if snap.status == SimulationStatus::Complete || snap.status == SimulationStatus::Disrupted {
+                eprintln!("  END at t={:.1}s: status={:?}", snap.time, snap.status);
+                break;
+            }
+        }
+        eprintln!("CENTAUR peak: beta_N={:.2}, Te0={:.1} keV, tau_E={:.2} s, in_hmode={}",
+            peak_beta_n, peak_te0, peak_tau_e, "check snap");
+        assert!(peak_beta_n > 1.0, "CENTAUR should reach beta_N > 1.0, got {:.2}", peak_beta_n);
     }
 
     #[test]

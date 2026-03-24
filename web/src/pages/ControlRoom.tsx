@@ -71,7 +71,17 @@ export default function ControlRoom() {
   } = state
 
   const time = displaySnapshot?.time ?? 0
-  const duration = displaySnapshot?.duration ?? 10
+  // Extract duration from snapshot, or fall back to the program's duration
+  const duration = displaySnapshot?.duration ?? (() => {
+    try {
+      const prog = JSON.parse(programJson || '{}')
+      // Program duration = last time point on any waveform (typically ip)
+      if (prog.ip && Array.isArray(prog.ip) && prog.ip.length > 0) {
+        return prog.ip[prog.ip.length - 1][0] as number
+      }
+    } catch { /* ignore */ }
+    return 10
+  })()
   const progress = duration > 0 ? (time / duration) * 100 : 0
 
   const handleDeviceChange = (newDeviceId: string) => {

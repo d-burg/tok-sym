@@ -47,7 +47,7 @@ const SCALAR_PARAMS: ScalarParam[] = [
   { key: 'd2_puff', label: 'D₂ gas puff', unit: '10²⁰/s', waveformKey: 'd2_puff', min: 0, max: 10, step: 0.5, precision: 1 },
   { key: 'neon_puff', label: 'Neon seeding', unit: '10²⁰/s', waveformKey: 'neon_puff', min: 0, max: 2.0, step: 0.05, precision: 2 },
   { key: 'kappa', label: 'Elongation κ', unit: '', waveformKey: 'kappa', min: 1.0, max: 2.2, step: 0.05, precision: 2 },
-  { key: 'delta', label: 'Triangularity δ', unit: '', waveformKey: 'delta', min: 0.0, max: 0.8, step: 0.05, precision: 2 },
+  { key: 'delta', label: 'Triangularity δ', unit: '', waveformKey: 'delta', min: -0.6, max: 0.8, step: 0.05, precision: 2 },
 ]
 
 /* ─── Per-device duration limits ───────────────────────── */
@@ -241,7 +241,10 @@ export default function ShotPlanner({
         <div>
           <label className="text-[10px] text-gray-500 uppercase tracking-wider">Base preset</label>
           <div className="flex rounded overflow-hidden border border-gray-700 mt-1">
-            {(['hmode', 'lmode', 'density_limit'] as PresetId[]).map((p) => (
+            {(deviceId === 'centaur'
+              ? (['hmode', 'density_limit'] as PresetId[])
+              : (['hmode', 'lmode', 'density_limit'] as PresetId[])
+            ).map((p) => (
               <button
                 key={p}
                 onClick={() => onPresetChange(p)}
@@ -252,7 +255,9 @@ export default function ShotPlanner({
                       : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                   }`}
               >
-                {p === 'hmode' ? 'H-mode' : p === 'lmode' ? 'L-mode' : 'Dens. lim.'}
+                {p === 'hmode'
+                  ? (deviceId === 'centaur' ? 'NT-edge' : 'H-mode')
+                  : p === 'lmode' ? 'L-mode' : 'Dens. lim.'}
               </button>
             ))}
           </div>

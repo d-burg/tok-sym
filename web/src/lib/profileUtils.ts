@@ -80,11 +80,23 @@ export function processProfileFrames(frames: ProfileFrame[]): {
     const tePeak = Math.max(...te, 0.01)
     const nePeak = Math.max(...ne, 0.001)
 
-    for (let i = 0; i < THOMSON_POINTS; i++) {
-      // Non-uniform radial distribution: denser at edge (like DIII-D edge Thomson).
-      // Map uniform r → rho = r^0.6 which concentrates points toward rho=1.
-      const r = 0.03 + rng() * 0.94 // uniform in [0.03, 0.97]
-      const rho = Math.pow(r, 0.6) // shifts distribution toward edge
+    // Discrete Thomson scattering channels: ~20 fixed ψ_N positions,
+    // more closely packed at the edge (like real DIII-D/JET Thomson systems).
+    // Core channels at ~0.05 spacing, edge channels at ~0.02 spacing.
+    const thomsonChannels: number[] = []
+    // Core channels (ψ_N = 0.05 to 0.50, spacing ~0.05)
+    for (let psi = 0.05; psi <= 0.50; psi += 0.05) thomsonChannels.push(psi)
+    // Mid channels (ψ_N = 0.55 to 0.75, spacing ~0.04)
+    for (let psi = 0.55; psi <= 0.75; psi += 0.04) thomsonChannels.push(psi)
+    // Edge channels (ψ_N = 0.80 to 0.98, spacing ~0.02)
+    for (let psi = 0.80; psi <= 0.98; psi += 0.02) thomsonChannels.push(psi)
+
+    // Multiple points per channel to create visible vertical bands
+    const POINTS_PER_CHANNEL = 5
+    for (let i = 0; i < thomsonChannels.length; i++) {
+      for (let j = 0; j < POINTS_PER_CHANNEL; j++) {
+      // Fixed channel position with small radial jitter per measurement
+      const rho = thomsonChannels[i] + (rng() - 0.5) * 0.006
 
       // Interpolate profile at this rho
       const idx = rho * (nRho - 1)
@@ -107,6 +119,7 @@ export function processProfileFrames(frames: ProfileFrame[]): {
         rho,
         val: neVal * (1 + gaussian(rng, neSigma)),
       })
+      } // end POINTS_PER_CHANNEL loop
     }
 
     return {

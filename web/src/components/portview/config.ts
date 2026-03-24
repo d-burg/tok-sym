@@ -120,13 +120,15 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
         shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number; texture?: 'dark' | 'rf' }
       const ports: Port[] = []
 
-      // ── Midplane: big rounded rectangles, alternating RF and dark ──
+      // ── Midplane: wide rectangular ports, alternating RF and dark ──
+      // Shifted 15° toroidally to offset from upper/lower bands
       const nMid = 12
       const dphiMid = (2 * Math.PI) / nMid
+      const phiOffset = Math.PI / 12  // 15° toroidal shift
       for (let k = 0; k < nMid; k++) {
-        const phi = k * dphiMid
+        const phi = k * dphiMid + phiOffset
         const tex = (k % 2 === 0) ? 'rf' as const : 'dark' as const
-        ports.push({ theta: 0, phi, radius: 0.24, zRadius: 0.34, shape: 'stadium', toroidalExtent: 0.06, texture: tex })
+        ports.push({ theta: 0, phi, radius: 0.30, zRadius: 0.28, shape: 'square', texture: tex })
       }
 
       // ── Upper band (theta ≈ 50°): dense rounded rectangles ──
@@ -248,6 +250,9 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       const dphi = (2 * Math.PI) / nPorts
       for (let k = 0; k < nPorts; k++) {
         const phi = k * dphi
+        // Skip ports near the camera viewport (k=0 at viewport, k=1/k=2 right,
+        // k=15 left) to avoid occluding the view into the vessel interior
+        if (k === 0 || k === 1 || k === 2 || k === 15) continue
         // JET outboard midplane: mostly all RF ridges (Faraday screens)
         // Very tall — JET's ICRH antennas span most of the outboard midplane height
         if (k % 2 === 0) {
