@@ -83,20 +83,11 @@ export function useSimulation(
       simRef.current.free()
     }
 
-    // For JET DT, boost heating to match DTE2 campaign conditions
-    // (real JET DTE2 used ~35 MW NBI + 10 MW ICRH = 45 MW total)
-    const isDTOverride = massOverrideRef.current !== null && massOverrideRef.current > 2.0
-    const jetDT = deviceId === 'jet' && isDTOverride && preset === 'hmode'
-
     let handle: SimHandle
-    let program = getPreset(deviceId, preset)
+    const program = getPreset(deviceId, preset)
 
-    if (false) { // eslint-disable-line -- placeholder for future DT program mods
-      handle = SimHandle.from_preset(deviceId, preset)
-    } else {
-      handle = SimHandle.from_preset(deviceId, preset)
-      programJsonRef.current = program ? JSON.stringify(program) : '{}'
-    }
+    handle = SimHandle.from_preset(deviceId, preset)
+    programJsonRef.current = program ? JSON.stringify(program) : '{}'
 
     if (massOverrideRef.current !== null) {
       handle.set_mass_number(massOverrideRef.current)
