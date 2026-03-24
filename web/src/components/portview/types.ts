@@ -33,11 +33,23 @@ export interface PortConfig {
     limiterGridSpacing: { poloidal: number; toroidal: number }
     limiterZThreshold: number
   }
-  extraPorts?: { theta: number; phi: number; radius: number; zRadius?: number }[]
+  extraPorts?: {
+    theta: number; phi: number; radius: number; zRadius?: number
+    /** Port shape: 'circle' (default), 'square', 'stadium' (rectangle with semicircle ends) */
+    shape?: 'circle' | 'square' | 'stadium'
+    /** For stadium shape: half-length of the straight section in the toroidal direction (metres) */
+    toroidalExtent?: number
+    /** Port texture: 'dark' (default, deep recess), 'rf' (ridged metallic Faraday screen) */
+    texture?: 'dark' | 'rf'
+  }[]
   antennae?: { r: number; zMin: number; zMax: number; phiMin: number; phiMax: number }[]
   fresnelStrength?: number
   inboardStyle?: 'tiles' | 'bands'
   bandWidth?: number
+  /** Vertical (toroidal) band width in metres; 0 = off. JET octant panels. */
+  vertBandWidth?: number
+  /** Brightness contrast between alternating vertical bands (0-1). */
+  vertBandContrast?: number
   divertorRegion?: {
     zThreshold: number
     tileColor: [number, number, number]

@@ -23,7 +23,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     portR: 2.35, portZ: 0, portRadius: 0.42, portLength: 0.25, portPhi: 0,
     camR: 2.60, camZ: 0.04, camPhi: 0,
     lookR: 1.10, lookZ: -0.02, lookPhi: 0.28, fov: 80,
-    tileColor: [38, 38, 42],
+    tileColor: [26, 26, 30],
     tileGridSpacing: { poloidal: 0.10, toroidal: 0.10 },
     tileGridDarken: 0.30,
     phiMin: -Math.PI, phiMax: Math.PI,
@@ -34,47 +34,75 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       limiterGridSpacing: { poloidal: 0.10, toroidal: 0.20 },
       limiterZThreshold: 0.80,
     },
-    extraPorts: [
-      // ─── Upper outboard "2 o'clock" (theta 20°–55°) ───
-      { theta: 45, phi: 0.18,  radius: 0.10 },
-      { theta: 35, phi: -0.28, radius: 0.09 },
-      { theta: 50, phi: 0.42,  radius: 0.07 },
-      { theta: 25, phi: 0.48,  radius: 0.08 },
-      { theta: 40, phi: -0.55, radius: 0.07 },
-      { theta: 55, phi: 0.80,  radius: 0.06 },
-      { theta: 30, phi: -0.78, radius: 0.06 },
-      { theta: 38, phi: 0.05,  radius: 0.08 },
+    extraPorts: (() => {
+      // DIII-D realistic port arrangement: 3 densely cluttered toroidal bands.
+      // DIII-D has ~24 toroidal sectors — one of the most heavily diagnosed tokamaks.
+      // Midplane: wide rectangular ports + RF antenna housings, densely packed
+      // Upper/lower (±55°): vertically-oriented racetracks + circles, 20 each
+      type Port = { theta: number; phi: number; radius: number; zRadius?: number;
+        shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number }
+      const ports: Port[] = []
 
-      // ─── Midplane "3 o'clock" (theta -15°–15°) ───
-      { theta: 8,   phi: -0.32, radius: 0.07 },
-      { theta: -10, phi: 0.42,  radius: 0.06 },
-      { theta: 15,  phi: 0.38,  radius: 0.06 },
-      { theta: -15, phi: -0.38, radius: 0.06 },
-      { theta: 5,   phi: 0.82,  radius: 0.07 },
-      { theta: -5,  phi: -0.78, radius: 0.06 },
+      // ── Midplane band (theta ≈ -5°, shifted down slightly): dense tall rectangles ──
+      // All ports have similar large heights; some are very long toroidally.
+      const nMid = 16
+      const dphiMid = (2 * Math.PI) / nMid
+      for (let k = 0; k < nMid; k++) {
+        const phi = k * dphiMid
+        // Alternate RF emitters and dark NBI/diagnostic ports
+        const tex = (k % 3 === 0) ? 'rf' as const : 'dark' as const
+        if (k % 4 === 0) {
+          // Very long toroidal RF antenna housing
+          ports.push({ theta: -5, phi, radius: 0.28, zRadius: 0.24, shape: 'square', texture: 'rf' })
+        } else if (k % 4 === 2) {
+          // Long toroidal diagnostic port
+          ports.push({ theta: -5, phi, radius: 0.22, zRadius: 0.22, shape: 'square', texture: tex })
+        } else {
+          // Standard tall rectangle — alternate
+          ports.push({ theta: -5, phi, radius: 0.16, zRadius: 0.22, shape: 'square', texture: tex })
+        }
+      }
 
-      // ─── Lower outboard "4 o'clock" (theta -55°–-20°) ───
-      { theta: -30, phi: 0.20,  radius: 0.09 },
-      { theta: -42, phi: -0.25, radius: 0.10 },
-      { theta: -25, phi: -0.58, radius: 0.07 },
-      { theta: -35, phi: 0.55,  radius: 0.08 },
-      { theta: -50, phi: 0.35,  radius: 0.06 },
-      { theta: -28, phi: -0.75, radius: 0.06 },
-      { theta: -38, phi: 0.80,  radius: 0.07 },
-      { theta: -45, phi: -0.45, radius: 0.08 },
-    ],
+      // ── Upper band (theta ≈ 45°, shifted down from 55°) ──
+      const nUL = 20
+      const dphiUL = (2 * Math.PI) / nUL
+      for (let k = 0; k < nUL; k++) {
+        const phi = k * dphiUL
+        if (k % 3 === 0) {
+          ports.push({ theta: 45, phi, radius: 0.11, zRadius: 0.11, shape: 'stadium', toroidalExtent: 0.06 })
+        } else if (k % 3 === 1) {
+          ports.push({ theta: 45, phi, radius: 0.14, shape: 'circle' })
+        } else {
+          ports.push({ theta: 45, phi, radius: 0.09, zRadius: 0.09, shape: 'stadium', toroidalExtent: 0.05 })
+        }
+      }
+
+      // ── Lower band (theta ≈ -45°, shifted up from -55°) ──
+      for (let k = 0; k < nUL; k++) {
+        const phi = (k + 0.5) * dphiUL
+        if (k % 3 === 0) {
+          ports.push({ theta: -50, phi, radius: 0.11, zRadius: 0.11, shape: 'stadium', toroidalExtent: 0.06 })
+        } else if (k % 3 === 1) {
+          ports.push({ theta: -50, phi, radius: 0.14, shape: 'circle' })
+        } else {
+          ports.push({ theta: -50, phi, radius: 0.09, zRadius: 0.09, shape: 'stadium', toroidalExtent: 0.05 })
+        }
+      }
+
+      return ports
+    })(),
     antennae: [
       { r: 2.35, zMin: -0.28, zMax: 0.28, phiMin: 0.55, phiMax: 0.72 },   // ICRH
       { r: 2.35, zMin: -0.12, zMax: 0.12, phiMin: -0.60, phiMax: -0.48 },  // LHRF
       { r: 2.35, zMin: -0.18, zMax: 0.18, phiMin: -0.92, phiMax: -0.80 },  // ECH launcher
     ],
-    fresnelStrength: 0.55,
+    fresnelStrength: 0.30,
   },
   centaur: {
     portR: 2.73, portZ: 0, portRadius: 0.42, portLength: 0.22, portPhi: 0,
     camR: 2.95, camZ: 0.04, camPhi: 0,
     lookR: 1.30, lookZ: -0.02, lookPhi: 0.26, fov: 80,
-    tileColor: [34, 34, 38],
+    tileColor: [22, 22, 26],
     tileGridSpacing: { poloidal: 0.10, toroidal: 0.10 },
     tileGridDarken: 0.28,
     phiMin: -Math.PI, phiMax: Math.PI,
@@ -85,39 +113,44 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       limiterGridSpacing: { poloidal: 0.10, toroidal: 0.18 },
       limiterZThreshold: 1.0,
     },
-    extraPorts: [
-      // ─── Upper outboard "2 o'clock" (theta 20°–50°) ───
-      { theta: 40, phi: 0.20,  radius: 0.09 },
-      { theta: 30, phi: -0.30, radius: 0.08 },
-      { theta: 45, phi: 0.50,  radius: 0.07 },
-      { theta: 25, phi: 0.45,  radius: 0.07 },
-      { theta: 35, phi: -0.60, radius: 0.06 },
-      { theta: 50, phi: 0.75,  radius: 0.06 },
-      { theta: 28, phi: -0.80, radius: 0.06 },
+    extraPorts: (() => {
+      // CENTAUR: compact HTS tokamak — densely packed rounded-rectangle ports.
+      // Many diagnostic ports above/below midplane, big rounded rectangles at midplane.
+      type Port = { theta: number; phi: number; radius: number; zRadius?: number;
+        shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number; texture?: 'dark' | 'rf' }
+      const ports: Port[] = []
 
-      // ─── Midplane "3 o'clock" (theta -15°–15°) ───
-      { theta: 8,   phi: -0.35, radius: 0.07 },
-      { theta: -10, phi: 0.40,  radius: 0.06 },
-      { theta: 12,  phi: 0.35,  radius: 0.06 },
-      { theta: -12, phi: -0.40, radius: 0.06 },
-      { theta: 5,   phi: 0.85,  radius: 0.06 },
-      { theta: -5,  phi: -0.80, radius: 0.06 },
+      // ── Midplane: big rounded rectangles, alternating RF and dark ──
+      const nMid = 12
+      const dphiMid = (2 * Math.PI) / nMid
+      for (let k = 0; k < nMid; k++) {
+        const phi = k * dphiMid
+        const tex = (k % 2 === 0) ? 'rf' as const : 'dark' as const
+        ports.push({ theta: 0, phi, radius: 0.24, zRadius: 0.34, shape: 'stadium', toroidalExtent: 0.06, texture: tex })
+      }
 
-      // ─── Lower outboard "4 o'clock" (theta -50°–-20°) ───
-      { theta: -28, phi: 0.18,  radius: 0.08 },
-      { theta: -40, phi: -0.28, radius: 0.09 },
-      { theta: -25, phi: -0.55, radius: 0.07 },
-      { theta: -35, phi: 0.50,  radius: 0.07 },
-      { theta: -48, phi: 0.38,  radius: 0.06 },
-      { theta: -30, phi: -0.75, radius: 0.06 },
-      { theta: -42, phi: 0.78,  radius: 0.06 },
-    ],
+      // ── Upper band (theta ≈ 50°): dense rounded rectangles ──
+      const nUL = 24
+      const dphiUL = (2 * Math.PI) / nUL
+      for (let k = 0; k < nUL; k++) {
+        const phi = k * dphiUL
+        ports.push({ theta: 50, phi, radius: 0.10, zRadius: 0.10, shape: 'stadium', toroidalExtent: 0.06 })
+      }
+
+      // ── Lower band (theta ≈ -50°): same, offset ──
+      for (let k = 0; k < nUL; k++) {
+        const phi = (k + 0.5) * dphiUL
+        ports.push({ theta: -50, phi, radius: 0.10, zRadius: 0.10, shape: 'stadium', toroidalExtent: 0.06 })
+      }
+
+      return ports
+    })(),
     antennae: [
       // ICRF antenna — large Faraday screen panel on outboard midplane
       { r: 2.73, zMin: -0.35, zMax: 0.35, phiMin: 0.50, phiMax: 0.70 },
       { r: 2.73, zMin: -0.35, zMax: 0.35, phiMin: -0.70, phiMax: -0.50 },
     ],
-    fresnelStrength: 0.40,
+    fresnelStrength: 0.22,
     divertorRegion: {
       zThreshold: -1.2,
       tileColor: [20, 18, 16],
@@ -139,11 +172,22 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       limiterGridSpacing: { poloidal: 0.15, toroidal: 0.30 },
       limiterZThreshold: 2.5,
     },
-    extraPorts: [
-      { theta: 25,  phi: 0.12,  radius: 0.22 },
-      { theta: -30, phi: -0.08, radius: 0.20 },
-      { theta: 5,   phi: -0.25, radius: 0.18 },
-    ],
+    extraPorts: (() => {
+      // ITER: 18 equatorial ports at 20° intervals — large rectangular openings.
+      // ITER has fewer but much larger ports than smaller tokamaks.
+      type Port = { theta: number; phi: number; radius: number; zRadius?: number;
+        shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number; texture?: 'dark' | 'rf' }
+      const ports: Port[] = []
+      const nPorts = 18
+      const dphi = (2 * Math.PI) / nPorts
+      for (let k = 0; k < nPorts; k++) {
+        const phi = k * dphi
+        // Alternate RF (ICRH/ECRH launchers) and dark (diagnostic/NBI) ports
+        const tex = (k % 3 === 0) ? 'rf' as const : 'dark' as const
+        ports.push({ theta: 0, phi, radius: 0.55, zRadius: 0.70, shape: 'square', texture: tex })
+      }
+      return ports
+    })(),
     antennae: [
       { r: 8.30, zMin: -0.8, zMax: 0.8, phiMin: 0.35, phiMax: 0.55 },
     ],
@@ -164,10 +208,18 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       limiterGridSpacing: { poloidal: 0.08, toroidal: 0.14 },
       limiterZThreshold: 0.55,
     },
-    extraPorts: [
-      { theta: 20,  phi: 0.15,  radius: 0.06 },
-      { theta: -15, phi: -0.20, radius: 0.05 },
-    ],
+    extraPorts: (() => {
+      const ports: { theta: number; phi: number; radius: number }[] = []
+      const nSectors = 10
+      for (let k = 0; k < nSectors; k++) {
+        const phi = (k / nSectors) * 2 * Math.PI
+        ports.push({ theta:  25, phi, radius: 0.07 })
+        ports.push({ theta:  55, phi, radius: 0.06 })
+        ports.push({ theta: -25, phi, radius: 0.07 })
+        ports.push({ theta: -55, phi, radius: 0.06 })
+      }
+      return ports
+    })(),
     fresnelStrength: 0.18,
   },
   jet: {
@@ -185,33 +237,27 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
       limiterGridSpacing: { poloidal: 0.12, toroidal: 0.22 },
       limiterZThreshold: 1.2,
     },
-    extraPorts: [
-      // ─── Upper outboard "2 o'clock" (theta 25°–55°) ───
-      { theta: 40, phi: 0.15,  radius: 0.14 },
-      { theta: 50, phi: -0.35, radius: 0.12 },
-      { theta: 30, phi: 0.50,  radius: 0.10 },
-      { theta: 45, phi: 0.72,  radius: 0.09 },
-      { theta: 35, phi: -0.62, radius: 0.11 },
-      { theta: 55, phi: 0.40,  radius: 0.08 },
-      { theta: 28, phi: -0.85, radius: 0.09 },
-
-      // ─── Midplane "3 o'clock" (theta -15°–15°) ───
-      { theta: 10,  phi: 0.22,  radius: 0.08 },
-      { theta: -10, phi: -0.20, radius: 0.08 },
-      { theta: 5,   phi: 0.60,  radius: 0.07 },
-      { theta: -8,  phi: -0.60, radius: 0.07 },
-      { theta: 15,  phi: 0.98,  radius: 0.09 },
-      { theta: -12, phi: -0.98, radius: 0.08 },
-
-      // ─── Lower outboard "4 o'clock" (theta -55°–-20°) ───
-      { theta: -30, phi: 0.18,  radius: 0.13 },
-      { theta: -42, phi: -0.30, radius: 0.11 },
-      { theta: -25, phi: 0.55,  radius: 0.10 },
-      { theta: -48, phi: 0.72,  radius: 0.09 },
-      { theta: -35, phi: -0.55, radius: 0.10 },
-      { theta: -22, phi: -0.82, radius: 0.08 },
-      { theta: -40, phi: 0.42,  radius: 0.08 },
-    ],
+    extraPorts: (() => {
+      // JET: large rectangular outboard midplane ports — octant structure.
+      // JET has 8 octants with very large access ports, densely spaced.
+      // No circular viewports — all rectangular patches.
+      type Port = { theta: number; phi: number; radius: number; zRadius?: number;
+        shape?: 'circle' | 'square' | 'stadium'; toroidalExtent?: number; texture?: 'dark' | 'rf' }
+      const ports: Port[] = []
+      const nPorts = 16
+      const dphi = (2 * Math.PI) / nPorts
+      for (let k = 0; k < nPorts; k++) {
+        const phi = k * dphi
+        // JET outboard midplane: mostly all RF ridges (Faraday screens)
+        // Very tall — JET's ICRH antennas span most of the outboard midplane height
+        if (k % 2 === 0) {
+          ports.push({ theta: 0, phi, radius: 0.55, zRadius: 1.10, shape: 'square', texture: 'rf' })
+        } else {
+          ports.push({ theta: 0, phi, radius: 0.45, zRadius: 0.95, shape: 'square', texture: 'rf' })
+        }
+      }
+      return ports
+    })(),
     antennae: [
       // JET A2 ICRH antenna modules — 4 large Faraday screen panels
       { r: 3.80, zMin: -0.55, zMax: 0.55, phiMin: 0.30, phiMax: 0.52 },
@@ -222,6 +268,12 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     fresnelStrength: 0.25,
     inboardStyle: 'bands',
     bandWidth: 0.06,
+    // JET octant panel banding — 8 octants around the torus.
+    // The toroidal grid spacing is 0.10m, and the wall has 100 slices
+    // over 2π. Band width is the toroidal arc per octant: 2π*R0/8 ≈ 2.24m
+    // but in grid-space coordinates: 100 slices × 0.10m / 8 ≈ 1.25m
+    vertBandWidth: 0.35,
+    vertBandContrast: 0.55,
     divertorRegion: {
       zThreshold: -1.0,
       tileColor: [18, 16, 14],

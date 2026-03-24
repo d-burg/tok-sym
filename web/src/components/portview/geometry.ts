@@ -394,6 +394,54 @@ function findOutboardR(pts: [number, number][], z: number): number {
  *
  * Supports elliptical ports via the zRadius field.
  */
+
+/** Resolved port position in (R, Z, φ) space for shader-based rendering. */
+export interface ResolvedPort {
+  wallR: number
+  wallZ: number
+  phi: number
+  radius: number
+  zRadius: number
+  /** 0 = circle, 1 = square, 2 = stadium */
+  shape: number
+  /** Half-length of the straight section for stadium ports (metres) */
+  toroidalExtent: number
+  /** 0 = dark recess, 1 = ridged RF emitter */
+  textureType: number
+}
+
+/**
+ * Resolve each extra port's (R, Z) wall position by ray-casting against
+ * the limiter contour.  Returns an array ready for packing into a data
+ * texture consumed by the wall fragment shader.
+ */
+export function resolveExtraPortPositions(
+  cfg: PortConfig,
+  limiterPts: [number, number][],
+): ResolvedPort[] {
+  const ports = cfg.extraPorts
+  if (!ports || ports.length === 0) return []
+  const center = contourCenter(limiterPts)
+  const resolved: ResolvedPort[] = []
+  const shapeMap = { circle: 0, square: 1, stadium: 2 } as const
+  const texMap = { dark: 0, rf: 1 } as const
+  for (const port of ports) {
+    const hit = sampleContourAtAngle(limiterPts, port.theta, center)
+    if (!hit) continue
+    resolved.push({
+      wallR: hit.r,
+      wallZ: hit.z,
+      phi: port.phi,
+      radius: port.radius,
+      zRadius: port.zRadius ?? port.radius,
+      shape: shapeMap[port.shape ?? 'circle'] ?? 0,
+      toroidalExtent: port.toroidalExtent ?? 0,
+      textureType: texMap[port.texture ?? 'dark'] ?? 0,
+    })
+  }
+  return resolved
+}
+
 export function buildExtraPortDecals(
   cfg: PortConfig,
   limiterPts: [number, number][],
