@@ -257,7 +257,7 @@ pub fn iter() -> Device {
         delta_lower: 0.55,
         volume: 837.0,
         surface_area: 683.0,
-        mass_number: 2.5, // D-T mix
+        mass_number: 2.0, // DD default (commissioning phase); DT via fuel toggle
         z_eff: 1.7,
         z0: 0.35, // plasma center above vessel midplane (X-point into lower divertor)
         wall_outline: iter_wall(),
@@ -308,17 +308,106 @@ pub fn jet() -> Device {
     }
 }
 
+/// Approximate CENTAUR wall outline (simplified polygon).
+///
+/// Based on the CENTAUR design study cross-section. Negative triangularity
+/// vessel with elongated NT-shaped vacuum vessel enclosing the limiter.
+/// The vessel is wider at the midplane and features divertor structures
+/// at top and bottom. Vertically symmetric.
+/// Traversed clockwise starting from the outboard midplane.
+fn centaur_wall() -> Vec<(f64, f64)> {
+    vec![
+        // Outboard midplane → top
+        (2.85, 0.00),
+        (2.84, 0.25),
+        (2.82, 0.50),
+        (2.78, 0.80),
+        (2.72, 1.05),
+        (2.68, 1.20),
+        // Upper divertor region (outboard)
+        (2.75, 1.35),
+        (2.80, 1.50),
+        (2.55, 1.65),
+        (2.35, 1.70),
+        // Top dome (narrower — NT shape)
+        (2.15, 1.65),
+        (1.90, 1.45),
+        (1.60, 1.10),
+        (1.35, 0.80),
+        // Inboard wall (compact)
+        (1.18, 0.55),
+        (1.10, 0.30),
+        (1.08, 0.00),
+        // Inboard lower wall
+        (1.10, -0.30),
+        (1.18, -0.55),
+        (1.35, -0.80),
+        (1.60, -1.10),
+        (1.90, -1.45),
+        // Lower divertor region
+        (2.15, -1.65),
+        (2.35, -1.70),
+        (2.55, -1.65),
+        (2.80, -1.50),
+        (2.75, -1.35),
+        // Outboard lower wall → midplane
+        (2.68, -1.20),
+        (2.72, -1.05),
+        (2.78, -0.80),
+        (2.82, -0.50),
+        (2.84, -0.25),
+        (2.85, 0.00),
+    ]
+}
+
+pub fn centaur() -> Device {
+    Device {
+        name: "CENTAUR".to_string(),
+        id: "centaur".to_string(),
+        r0: 2.0,
+        a: 0.72,
+        bt_max: 10.9,
+        ip_max: 9.6,
+        kappa: 1.65,
+        delta_upper: -0.55, // Negative triangularity!
+        delta_lower: -0.55,
+        volume: 29.7,
+        surface_area: 63.0, // estimated from geometry
+        mass_number: 2.5,   // D-T mix for Q > 1 operation
+        z_eff: 1.43,
+        z0: 0.0, // vertically symmetric
+        wall_outline: centaur_wall(),
+        config: MagneticConfig::DoubleNull,
+        impurity_elm: ImpurityElmParams {
+            // NT plasmas are inherently ELM-free — these thresholds are
+            // set high since ELMs don't naturally occur in NT geometry.
+            impurity_type1_onset: 0.002,
+            impurity_type2_threshold: 0.005,
+            impurity_qce_threshold: 0.01,
+            impurity_collapse_threshold: 0.025,
+            q95_grassy_range: (5.0, 7.0),
+            delta_grassy_min: 0.3,
+        },
+        // NT plasmas have a higher L-H threshold (harder to transition to
+        // H-mode). CENTAUR is designed to operate ELM-free in L-mode/NT
+        // regime, achieving near-H-mode confinement (H98y2 ≈ 0.96) without
+        // the ELM penalty. High factor keeps the plasma in L-mode.
+        p_lh_factor: 3.0,
+    }
+}
+
 pub fn get_device(id: &str) -> Option<Device> {
     match id {
         "diiid" => Some(diiid()),
         "iter" => Some(iter()),
         "jet" => Some(jet()),
+        "centaur" => Some(centaur()),
         _ => None,
     }
 }
 
 pub fn all_devices() -> Vec<Device> {
-    vec![diiid(), iter(), jet()]
+    vec![diiid(), centaur(), iter(), jet()]
 }
 
 #[cfg(test)]

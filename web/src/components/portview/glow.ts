@@ -185,13 +185,28 @@ export function createGlowGroup(cfg: PortConfig, tuning?: GlowTuning): GlowGroup
     // ═══ PER-FRAME UPDATE: position jitter + stochastic brightness ═══
     const jitAmp = t.jitterAmplitude
     const glowR = t.color.r, glowG = t.color.g, glowB = t.color.b
+    // Offset strike point sprites inward from the wall surface so they're
+    // visible through the open toroidal sector.  Without this, sprites sit
+    // exactly on the wall mesh and are occluded by z-fighting / depth test.
+    // The offset must exceed the wall mesh thickness at the divertor (~5cm
+    // from triangulation) plus the point sprite half-size.
+    const axisR = params.axisR
+    const INWARD_OFFSET = 0.10  // metres toward plasma center
 
     for (let vi = 0; vi < activeCount; vi++) {
       // Subtle R/Z position jitter — fast-evolving for heat-shimmer effect
       const jitR = jitAmp * (pseudoRandom(vi * 127.1 + time * JITTER_RATE) - 0.5)
       const jitZ = jitAmp * (pseudoRandom(vi * 269.5 + time * JITTER_RATE) - 0.5)
 
-      const v = toroidal(basePosR[vi] + jitR, basePosZ[vi] + jitZ, basePhi[vi])
+      // Push R toward axis and Z toward midplane so sprites clear wall depth
+      const baseR = basePosR[vi]
+      const baseZ = basePosZ[vi]
+      const rSign = baseR > axisR ? -1 : 1
+      const zSign = baseZ > 0 ? -1 : 1
+      const rOff = rSign * INWARD_OFFSET
+      const zOff = zSign * INWARD_OFFSET * 0.7
+
+      const v = toroidal(baseR + jitR + rOff, baseZ + jitZ + zOff, basePhi[vi])
       posBuffer[vi * 3] = v.x
       posBuffer[vi * 3 + 1] = v.y
       posBuffer[vi * 3 + 2] = v.z
@@ -232,65 +247,82 @@ export function createGlowGroup(cfg: PortConfig, tuning?: GlowTuning): GlowGroup
  * because the tip isn't necessarily where the leg crosses the wall, and the
  * closest wall vertex can be far from the true intersection.
  */
+/**
+ * Walk a divertor leg path and find the first intersection with the wall.
+ */
+function findLegWallIntersection(
+  leg: [number, number][],
+  xpR: number, xpZ: number,
+  limiterPts: [number, number][],
+): StrikePoint | null {
+  if (leg.length < 2) return null
+
+  const fullLeg: [number, number][] = [[xpR, xpZ], ...leg]
+
+  for (let i = 0; i < fullLeg.length - 1; i++) {
+    const [ax, ay] = fullLeg[i]
+    const [bx, by] = fullLeg[i + 1]
+    const dx = bx - ax, dy = by - ay
+
+    let bestT = Infinity
+    let bestIntersection: [number, number] | null = null
+
+    for (let j = 0; j < limiterPts.length; j++) {
+      const nj = (j + 1) % limiterPts.length
+      const [cx, cy] = limiterPts[j]
+      const [ex, ey] = limiterPts[nj]
+      const fx = ex - cx, fy = ey - cy
+      const denom = dx * fy - dy * fx
+      if (Math.abs(denom) < 1e-12) continue
+      const t = ((cx - ax) * fy - (cy - ay) * fx) / denom
+      const u = ((cx - ax) * dy - (cy - ay) * dx) / denom
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1 && t < bestT) {
+        bestT = t
+        bestIntersection = [ax + t * dx, ay + t * dy]
+      }
+    }
+
+    if (bestIntersection) {
+      return { r: bestIntersection[0], z: bestIntersection[1] }
+    }
+  }
+  return null
+}
+
 export function findStrikePoints(
   sepPts: [number, number][],
   limiterPts: [number, number][],
   xpointR: number,
   xpointZ: number,
   _axisR: number,
+  xpointUpperR = 0,
+  xpointUpperZ = 0,
 ): StrikePoint[] {
   if (sepPts.length < 4 || xpointR <= 0) return []
 
   const results: StrikePoint[] = []
 
-  // Find separatrix points below the X-point (divertor legs)
+  // ── Lower divertor legs ──
   const belowXp = sepPts.filter(p => p[1] < xpointZ - 0.05)
-  if (belowXp.length < 2) return []
-
-  // Split into inner and outer legs using X-point R as dividing line
-  const innerLeg = belowXp.filter(p => p[0] < xpointR).sort((a, b) => b[1] - a[1])
-  const outerLeg = belowXp.filter(p => p[0] >= xpointR).sort((a, b) => b[1] - a[1])
-
-  // Find actual wall intersection for each leg
-  for (const leg of [innerLeg, outerLeg]) {
-    if (leg.length < 2) continue
-
-    // Prepend X-point to form full leg path (same as buildDivertorLegLines)
-    const fullLeg: [number, number][] = [[xpointR, xpointZ], ...leg]
-
-    // Walk along the leg and find the first intersection with the wall polygon
-    let hitPt: [number, number] | null = null
-    for (let i = 0; i < fullLeg.length - 1; i++) {
-      const [ax, ay] = fullLeg[i]
-      const [bx, by] = fullLeg[i + 1]
-      const dx = bx - ax, dy = by - ay
-
-      let bestT = Infinity
-      let bestIntersection: [number, number] | null = null
-
-      for (let j = 0; j < limiterPts.length; j++) {
-        const nj = (j + 1) % limiterPts.length
-        const [cx, cy] = limiterPts[j]
-        const [ex, ey] = limiterPts[nj]
-        const fx = ex - cx, fy = ey - cy
-        const denom = dx * fy - dy * fx
-        if (Math.abs(denom) < 1e-12) continue
-        const t = ((cx - ax) * fy - (cy - ay) * fx) / denom
-        const u = ((cx - ax) * dy - (cy - ay) * dx) / denom
-        if (t >= 0 && t <= 1 && u >= 0 && u <= 1 && t < bestT) {
-          bestT = t
-          bestIntersection = [ax + t * dx, ay + t * dy]
-        }
-      }
-
-      if (bestIntersection) {
-        hitPt = bestIntersection
-        break  // First intersection along the leg path
-      }
+  if (belowXp.length >= 2) {
+    const innerLeg = belowXp.filter(p => p[0] < xpointR).sort((a, b) => b[1] - a[1])
+    const outerLeg = belowXp.filter(p => p[0] >= xpointR).sort((a, b) => b[1] - a[1])
+    for (const leg of [innerLeg, outerLeg]) {
+      const hit = findLegWallIntersection(leg, xpointR, xpointZ, limiterPts)
+      if (hit) results.push(hit)
     }
+  }
 
-    if (hitPt) {
-      results.push({ r: hitPt[0], z: hitPt[1] })
+  // ── Upper divertor legs (double-null) ──
+  if (xpointUpperR > 0) {
+    const aboveXp = sepPts.filter(p => p[1] > xpointUpperZ + 0.05)
+    if (aboveXp.length >= 2) {
+      const innerLeg = aboveXp.filter(p => p[0] < xpointUpperR).sort((a, b) => a[1] - b[1])
+      const outerLeg = aboveXp.filter(p => p[0] >= xpointUpperR).sort((a, b) => a[1] - b[1])
+      for (const leg of [innerLeg, outerLeg]) {
+        const hit = findLegWallIntersection(leg, xpointUpperR, xpointUpperZ, limiterPts)
+        if (hit) results.push(hit)
+      }
     }
   }
 

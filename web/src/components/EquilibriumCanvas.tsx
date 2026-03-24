@@ -159,10 +159,25 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     buildWallPath()
     ctx.stroke()
 
-    // --- Draw magnetic axis ---
-    if (snapshot && snapshot.axis_r > 0) {
-      const ax = toX(snapshot.axis_r)
-      const ay = toY(snapshot.axis_z)
+    // --- Draw magnetic axis (only when plasma is present) ---
+    // Compute axis from centroid of the innermost flux surface so it
+    // tracks the actual rendered contours during dynamic shape changes.
+    const hasPlasma = snapshot && snapshot.ip > 0.05
+    if (hasPlasma && snapshot.axis_r > 0) {
+      let axisR = snapshot.axis_r
+      let axisZ = snapshot.axis_z
+      const innermost = snapshot.flux_surfaces?.[0]
+      if (innermost && innermost.points.length > 3) {
+        let sumR = 0, sumZ = 0
+        for (const pt of innermost.points) {
+          sumR += pt[0]
+          sumZ += pt[1]
+        }
+        axisR = sumR / innermost.points.length
+        axisZ = sumZ / innermost.points.length
+      }
+      const ax = toX(axisR)
+      const ay = toY(axisZ)
       ctx.fillStyle = '#f97316'
       ctx.beginPath()
       ctx.arc(ax, ay, 4, 0, Math.PI * 2)
@@ -195,10 +210,10 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       ctx.lineTo(xp - s, yp + s)
       ctx.stroke()
     }
-    if (snapshot && snapshot.xpoint_r > 0) {
+    if (hasPlasma && snapshot.xpoint_r > 0) {
       drawXMark(snapshot.xpoint_r, snapshot.xpoint_z)
     }
-    if (snapshot && (snapshot.xpoint_upper_r ?? 0) > 0) {
+    if (hasPlasma && (snapshot.xpoint_upper_r ?? 0) > 0) {
       drawXMark(snapshot.xpoint_upper_r, snapshot.xpoint_upper_z)
     }
 
@@ -279,7 +294,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     ctx.textBaseline = 'top'
     ctx.fillText('R (m)', (toX(rMin) + toX(rMax)) / 2, bottomEdge + 16)
     ctx.save()
-    ctx.translate(leftEdge - 22, (toY(zMax) + toY(zMin)) / 2)
+    ctx.translate(leftEdge - 34, (toY(zMax) + toY(zMin)) / 2)
     ctx.rotate(-Math.PI / 2)
     ctx.textBaseline = 'middle'
     ctx.fillText('Z (m)', 0, 0)
@@ -294,7 +309,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       let labelY = H - 22
       ctx.fillText(`q₉₅ = ${snapshot.q95.toFixed(2)}`, labelX, labelY)
       labelY -= 16
-      ctx.fillText(`βN = ${snapshot.beta_n.toFixed(2)}`, labelX, labelY)
+      ctx.fillText(`βₙ = ${snapshot.beta_n.toFixed(2)}`, labelX, labelY)
       labelY -= 16
       if (snapshot.in_hmode) {
         ctx.fillStyle = '#22d3ee'
@@ -305,14 +320,14 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       }
       labelY -= 16
       ctx.fillStyle = '#9ca3af'
-      ctx.fillText(`Bt = ${snapshot.bt.toFixed(2)} T`, labelX, labelY)
+      ctx.fillText(`Bₜ = ${snapshot.bt.toFixed(2)} T`, labelX, labelY)
       labelY -= 16
       if (snapshot.is_limited) {
         ctx.fillStyle = '#f59e0b'
-        ctx.fillText('LIMITED', labelX, labelY)
+        ctx.fillText('Limited', labelX, labelY)
       } else {
         ctx.fillStyle = '#6b7280'
-        ctx.fillText('DIVERTED', labelX, labelY)
+        ctx.fillText('Diverted', labelX, labelY)
       }
     }
   }, [snapshot, wallJson, limiterPoints, isModern])

@@ -72,6 +72,14 @@ export class SimHandle {
         wasm.simhandle_reset(this.__wbg_ptr);
     }
     /**
+     * Override the device's fuel mass number (e.g. 2.0 for DD, 2.5 for DT).
+     * Must be called before starting the simulation (before the first `step`).
+     * @param {number} mass
+     */
+    set_mass_number(mass) {
+        wasm.simhandle_set_mass_number(this.__wbg_ptr, mass);
+    }
+    /**
      * Get the current status as a string.
      * @returns {string}
      */

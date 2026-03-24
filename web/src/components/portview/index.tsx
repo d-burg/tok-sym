@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import type { Snapshot } from '../../lib/types'
 import { getPortConfig, DEVICE_OPACITY_SCALE, DEFAULT_OPACITY_SCALE, DEVICE_POWER_SCALE, DEFAULT_POWER_SCALE, DEVICE_GLOW_TUNING, DEFAULT_GLOW_TUNING } from './config'
 import { createCamera, updateCamera } from './camera'
-import { buildWallGeometry, buildPortGeometry, buildExtraPortCylinders } from './geometry'
+import { buildWallGeometry, buildPortGeometry, buildExtraPortDecals } from './geometry'
 import { createWallMaterial, createPortMaterial, createExtraPortMaterial, updateStrikePoints } from './wallMaterial'
 import { createPlasmaGroup } from './plasma'
 import { createGlowGroup, findStrikePoints, type StrikePoint } from './glow'
@@ -41,6 +41,11 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
   const stateRef = useRef<SceneState | null>(null)
   const glowIntensityRef = useRef(0)
   const frozenStrikePointsRef = useRef<StrikePoint[]>([])
+  const peakIpRef = useRef(0)
+  const peakStableFramesRef = useRef(0)
+  const flatTopReachedRef = useRef(false)
+  const prevStrikeFingerprint = useRef('')
+  const strikeStableFramesRef = useRef(0)
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -190,12 +195,12 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
     state.scene.add(portMesh)
     state.portMesh = portMesh
 
-    // Build extra port recess cylinders (dark inset openings)
-    const extraPortGeom = buildExtraPortCylinders(cfg)
+    // Build extra port decal discs (dark circles snapped to wall surface)
+    const extraPortGeom = buildExtraPortDecals(cfg, pts)
     if (extraPortGeom) {
       const extraPortMat = createExtraPortMaterial()
       const extraPortMesh = new THREE.Mesh(extraPortGeom, extraPortMat)
-      extraPortMesh.renderOrder = 0
+      extraPortMesh.renderOrder = 1   // render after wall (0) so polygonOffset wins
       state.scene.add(extraPortMesh)
       state.extraPortMesh = extraPortMesh
     } else {
@@ -231,6 +236,15 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     if (needsRebuild) {
       rebuildGeometry()
+      // Reset all glow state when device changes — prevents stale strike
+      // positions from the old device bleeding into the new one.
+      glowIntensityRef.current = 0
+      frozenStrikePointsRef.current = []
+      peakIpRef.current = 0
+      peakStableFramesRef.current = 0
+      flatTopReachedRef.current = false
+      prevStrikeFingerprint.current = ''
+      strikeStableFramesRef.current = 0
     }
 
     if (!snapshot) return
@@ -277,30 +291,80 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
 
     // Update glow with smooth fade in/out
     if (state.glowGroup && pts) {
-      // Smooth glow intensity — fade in slowly, fade out quickly at ramp-down
-      const targetGlow = snapshot.in_hmode ? 0.8 : 0
-      const glowLerpRate = snapshot.in_hmode ? 0.04 : 0.25
+      // ── Flat-top detection for glow activation ──
+      // Glow should only appear once the equilibrium has settled at flat-top,
+      // NOT during ramp-up when the separatrix strike points are still moving.
+      // We track Ip stability AND strike-point position stability — the actual
+      // positions on the wall must stop changing before the glow appears.
+      if (snapshot.ip < 0.01 || snapshot.time < 0.01) {
+        peakIpRef.current = 0
+        peakStableFramesRef.current = 0
+        flatTopReachedRef.current = false
+        prevStrikeFingerprint.current = ''
+        strikeStableFramesRef.current = 0
+      }
+      const prevPeak = peakIpRef.current
+      if (snapshot.prog_ip > peakIpRef.current) {
+        peakIpRef.current = snapshot.prog_ip
+      }
+      if (peakIpRef.current > prevPeak + 0.001) {
+        peakStableFramesRef.current = 0
+      } else {
+        peakStableFramesRef.current++
+      }
+
+      // Always compute strike points so we can track their stability
+      const isDiverted = snapshot.xpoint_r > 0
+      const candidateStrikes = isDiverted ? findStrikePoints(
+        snapshot.separatrix.points,
+        pts,
+        snapshot.xpoint_r,
+        snapshot.xpoint_z,
+        snapshot.axis_r,
+        snapshot.xpoint_upper_r,
+        snapshot.xpoint_upper_z,
+      ) : []
+
+      // Track strike point position stability — fingerprint with 3mm precision.
+      // During ramp-up the strike points shift each frame; at flat-top they freeze.
+      const strikeFP = candidateStrikes
+        .map(sp => `${(sp.r * 333).toFixed(0)},${(sp.z * 333).toFixed(0)}`)
+        .join(':')
+      if (strikeFP !== prevStrikeFingerprint.current) {
+        strikeStableFramesRef.current = 0
+        prevStrikeFingerprint.current = strikeFP
+      } else {
+        strikeStableFramesRef.current++
+      }
+
+      // Declare flat-top when Ip is stable AND strike positions have settled
+      const ipStable = peakStableFramesRef.current >= 5 && peakIpRef.current > 0.5
+      const eqSettled = strikeStableFramesRef.current >= 15
+      if (ipStable && eqSettled) {
+        flatTopReachedRef.current = true
+      }
+      // End flat-top when prog_ip drops below 95% of peak (ramp-down started)
+      if (snapshot.prog_ip < 0.95 * peakIpRef.current) {
+        flatTopReachedRef.current = false
+      }
+
+      const hasSOLPower = snapshot.p_loss > 1.0 && snapshot.ip > 0.5
+      const glowActive = isDiverted && flatTopReachedRef.current && (snapshot.in_hmode || hasSOLPower)
+      const targetGlow = glowActive ? 0.8 : 0
+      const glowLerpRate = glowActive ? 0.04 : 0.25
       glowIntensityRef.current += (targetGlow - glowIntensityRef.current) * glowLerpRate
-      // Snap to zero when very small to avoid lingering traces
       if (glowIntensityRef.current < 0.005) glowIntensityRef.current = 0
       const glowIntensity = glowIntensityRef.current
 
-      // Strike point position logic:
-      // - In H-mode: compute from current separatrix and save as frozen reference
-      // - Fading out: use frozen positions so glow doesn't follow moving equilibrium
+      // Use frozen positions once glow is active — prevents any residual motion
       let strikePoints: StrikePoint[]
-      if (snapshot.in_hmode) {
-        strikePoints = findStrikePoints(
-          snapshot.separatrix.points,
-          pts,
-          snapshot.xpoint_r,
-          snapshot.xpoint_z,
-          snapshot.axis_r,
-        )
-        // Save current positions — these become the frozen fade-out positions
-        frozenStrikePointsRef.current = strikePoints
+      if (glowActive) {
+        if (frozenStrikePointsRef.current.length === 0) {
+          // First frame of glow — freeze the current positions permanently
+          frozenStrikePointsRef.current = candidateStrikes
+        }
+        strikePoints = frozenStrikePointsRef.current
       } else if (glowIntensity > 0.01) {
-        // Fading out — use the last known H-mode strike positions
         strikePoints = frozenStrikePointsRef.current
       } else {
         strikePoints = []
@@ -326,7 +390,7 @@ export default function PortView({ snapshot, limiterPoints, deviceId, wallJson, 
             if (spUniforms.length >= 8) break
             const v = toroidal(sp.r, sp.z, phi)
             const fadeFactor = Math.exp(-Math.abs(phi) * 0.5)
-            spUniforms.push({ x: v.x, y: v.y, z: v.z, intensity: powerScale * 0.5 * fadeFactor * wallGlowFactor })
+            spUniforms.push({ x: v.x, y: v.y, z: v.z, intensity: powerScale * 0.7 * fadeFactor * wallGlowFactor })
           }
         }
         updateStrikePoints(state.wallMaterial, spUniforms)

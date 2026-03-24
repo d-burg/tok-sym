@@ -4,25 +4,33 @@ import { getDevices, type Device } from '../lib/wasm'
 import { DIIID_LIMITER } from '../lib/diiid-geometry'
 import { JET_LIMITER } from '../lib/jet-geometry'
 import { ITER_LIMITER } from '../lib/iter-geometry'
+import { CENTAUR_LIMITER } from '../lib/centaur-geometry'
 
 /** Extra display-only metadata keyed by device id. */
-const DEVICE_META: Record<string, { location: string; desc: string }> = {
+const DEVICE_META: Record<string, { location: string; status?: string; desc: string }> = {
   diiid: {
     location: 'San Diego, USA',
-    desc: 'General Atomics workhorse — advanced shape control and the birthplace of the H-mode recipe.',
+    desc: 'Scenario development workhorse dating back to the late 1980s. The most extensively diagnosed tokamak in the world.',
+  },
+  centaur: {
+    location: 'Conceptual design',
+    desc: 'Compact negative-triangularity breakeven tokamak — ELM-free Q > 1 at 10.9 T with HTS magnets.',
   },
   iter: {
     location: 'Cadarache, France',
+    status: 'Under construction',
     desc: "The world's largest tokamak — designed to demonstrate 500 MW of fusion power (Q ≥ 10).",
   },
   jet: {
     location: 'Culham, UK',
+    status: 'Decommissioned',
     desc: "Europe's largest tokamak — holds the world record for fusion energy with its ITER-Like Wall.",
   },
 }
 
 const DEVICE_LIMITERS: Record<string, [number, number][]> = {
   diiid: DIIID_LIMITER,
+  centaur: CENTAUR_LIMITER,
   jet: JET_LIMITER,
   iter: ITER_LIMITER,
 }
@@ -49,6 +57,13 @@ function DeviceSilhouette({ device }: { device: Device }) {
       .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${-p[1]}`)
       .join(' ') + ' Z'
 
+  // Scale stroke width to viewBox so all devices appear equally bright.
+  // Target ~1px at the rendered size: the SVG is h-32 (128px),
+  // so strokeWidth ≈ viewBox extent / 128.
+  const extent = Math.max(w, h)
+  const sw = extent / 128
+  const markerR = extent * 0.006
+
   return (
     <svg
       viewBox={`${rMin - pad} ${-zMax - pad} ${w} ${h}`}
@@ -59,14 +74,14 @@ function DeviceSilhouette({ device }: { device: Device }) {
         d={pathData}
         fill="none"
         stroke="currentColor"
-        strokeWidth={0.015}
+        strokeWidth={sw}
         className="text-cyan-400"
       />
       {/* Magnetic axis marker */}
       <circle
         cx={device.r0}
         cy={0}
-        r={0.04}
+        r={markerR}
         className="fill-cyan-400 opacity-50"
       />
     </svg>
@@ -111,7 +126,7 @@ export default function DeviceSelect() {
       </div>
 
       {/* Device cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl w-full">
         {devices.map((d) => {
           const meta = DEVICE_META[d.id] ?? { location: '', desc: '' }
           return (
@@ -120,17 +135,25 @@ export default function DeviceSelect() {
               onClick={() => navigate(`/program/${d.id}`)}
               className="group bg-gray-900 border border-gray-700 rounded-lg p-6 text-left
                          hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/10
-                         transition-all duration-200 cursor-pointer"
+                         transition-all duration-200 cursor-pointer
+                         flex flex-col"
             >
-              {/* Cross-section silhouette */}
-              <DeviceSilhouette device={d} />
+              {/* Cross-section silhouette — fixed height */}
+              <div className="h-32">
+                <DeviceSilhouette device={d} />
+              </div>
 
               {/* Machine name */}
               <div className="flex items-baseline justify-between mb-1 mt-3">
                 <h2 className="text-2xl font-bold text-white group-hover:text-cyan-400 transition-colors">
                   {d.name}
                 </h2>
-                <span className="text-xs text-gray-500">{meta.location}</span>
+                <div className="text-right shrink-0 ml-2">
+                  <div className="text-xs text-gray-500">{meta.location}</div>
+                  {meta.status && (
+                    <div className="text-[10px] text-gray-600 italic">{meta.status}</div>
+                  )}
+                </div>
               </div>
 
               {/* Stats row */}
@@ -143,12 +166,12 @@ export default function DeviceSelect() {
                 <span>V = {d.volume} m³</span>
               </div>
 
-              {/* Description */}
-              <p className="text-gray-500 text-sm leading-relaxed">
+              {/* Description — flex-grow pushes the arrow to the bottom */}
+              <p className="text-gray-500 text-sm leading-relaxed flex-grow">
                 {meta.desc}
               </p>
 
-              {/* Arrow */}
+              {/* Arrow — always at bottom of card */}
               <div className="mt-4 text-right text-gray-600 group-hover:text-cyan-400 transition-colors">
                 Select →
               </div>

@@ -28,6 +28,7 @@ export interface Snapshot {
   time: number
   duration: number
   device_id: string
+  mass_number: number
 
   // Programmed references
   prog_ip: number
@@ -48,6 +49,7 @@ export interface Snapshot {
   p_ohmic: number
   p_rad: number
   p_loss: number
+  p_alpha: number
   beta_n: number
   beta_t: number
   q95: number

@@ -64,18 +64,22 @@ export function updateStrikePoints(
 }
 
 /**
- * Material for extra port recess cylinders — very dark with a subtle
- * depth gradient (slightly lighter at the opening, nearly black at the back).
- * Uses DoubleSide so port interiors are visible from any camera angle.
+ * Material for extra port decal discs — very dark circles that sit on
+ * the wall surface, simulating recessed port openings.
+ *
+ * Uses polygonOffset to win the depth test against the coplanar wall
+ * geometry (a standard decal technique). The radial gradient makes the
+ * center nearly black (deep recess) with a slightly lighter rim and
+ * a thin bright edge suggesting a metal lip.
  */
 export function createExtraPortMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: `
-      varying float v_depth;
+      varying vec2 v_uv;
       varying vec3 v_normal;
       varying vec3 v_viewDir;
       void main() {
-        v_depth = uv.y;
+        v_uv = uv;
         v_normal = normalize(normalMatrix * normal);
         vec4 worldPos = modelMatrix * vec4(position, 1.0);
         v_viewDir = normalize(cameraPosition - worldPos.xyz);
@@ -84,17 +88,31 @@ export function createExtraPortMaterial(): THREE.ShaderMaterial {
     `,
     fragmentShader: `
       precision highp float;
-      varying float v_depth;
+      varying vec2 v_uv;
       varying vec3 v_normal;
       varying vec3 v_viewDir;
       void main() {
+        // Distance from disc center (0 at center, 1 at edge)
+        float dist = length(v_uv - 0.5) * 2.0;
+
+        // Radial depth gradient: nearly black center, slightly lighter rim
+        float shade = mix(0.008, 0.035, dist * dist);
+
+        // Subtle rim highlight from viewing angle
         float NdotV = abs(dot(normalize(v_normal), normalize(v_viewDir)));
-        float shade = mix(0.05, 0.015, v_depth);
         shade *= 0.6 + 0.4 * NdotV;
+
+        // Thin bright rim at the very edge to suggest a metal lip
+        float rim = smoothstep(0.88, 0.95, dist) * (1.0 - smoothstep(0.95, 1.0, dist));
+        shade += rim * 0.06 * NdotV;
+
         gl_FragColor = vec4(vec3(shade), 1.0);
       }
     `,
     side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -4,
   })
 }
 

@@ -56,11 +56,18 @@ export default function StatusPanel({
     return bestIdx
   }, [processedProfiles, displayTime])
 
-  // Device lookup for fusion computation
-  const device = useMemo(
-    () => (snapshot ? getDevice(snapshot.device_id) : null),
-    [snapshot?.device_id]
-  )
+  // Device lookup for fusion computation.
+  // Use the snapshot's mass_number (which reflects DD/DT fuel override)
+  // rather than the static device definition.
+  const device = useMemo(() => {
+    if (!snapshot) return null
+    const base = getDevice(snapshot.device_id)
+    if (!base) return null
+    if (snapshot.mass_number != null && snapshot.mass_number !== base.mass_number) {
+      return { ...base, mass_number: snapshot.mass_number }
+    }
+    return base
+  }, [snapshot?.device_id, snapshot?.mass_number])
 
   // Fusion state (P_fus, Q, neutron rate)
   const fusion = useMemo<FusionState | null>(() => {
@@ -179,7 +186,7 @@ export default function StatusPanel({
           <Param label={<>q<sub>95</sub></>} value={s.q95} unit="" warn={s.q95 < 2.5} danger={s.q95 < 2.0} />
 
           <Param label={<>B<sub>t</sub></>} value={s.bt} unit="T" />
-          <Param label={<>n̄<sub>e</sub></>} value={s.ne_bar} unit="10²⁰" />
+          <Param label={<><span style={{ textDecoration: 'overline' }}>n</span><sub>e</sub></>} value={s.ne_bar} unit="10²⁰" />
           <Param label={<>β<sub>N</sub></>} value={s.beta_n} unit="" warn={s.beta_n > 2.5} danger={s.beta_n > 2.8} />
 
           <Param label={<>W<sub>th</sub></>} value={s.w_th} unit="MJ" />
@@ -243,12 +250,12 @@ function PowerBalance({ snapshot: s, fusion }: { snapshot: Snapshot; fusion: Fus
 
   // Output side
   const dWdt = Math.max(s.p_input - s.p_loss - s.p_rad, -s.p_input)
-  const outputItems: { label: React.ReactNode; value: number; color: string }[] = [
+  const outputItems: { label: React.ReactNode; value: number; color: string; fullLabel?: boolean }[] = [
     { label: <><sub>rad</sub></>, value: s.p_rad, color: '#ef4444' },
     { label: <><sub>loss</sub></>, value: s.p_loss, color: '#f97316' },
   ]
   if (Math.abs(dWdt) > 0.01) {
-    outputItems.push({ label: <>dW/dt</>, value: Math.abs(dWdt), color: '#eab308' })
+    outputItems.push({ label: <>dW/dt</>, value: Math.abs(dWdt), color: '#eab308', fullLabel: true })
   }
 
   const pOutputTotal = s.p_rad + s.p_loss + Math.max(dWdt, 0)
@@ -260,7 +267,7 @@ function PowerBalance({ snapshot: s, fusion }: { snapshot: Snapshot; fusion: Fus
     <div className="grid grid-cols-2 gap-x-4">
       {/* Input column */}
       <div>
-        <div className="text-[10px] text-gray-600 leading-none mb-1">INPUT</div>
+        <div className="text-[10px] text-gray-600 leading-none mb-1">Input</div>
         {inputItems.map((item, i) => (
           <PowerBar key={i} label={<>P{item.label}</>} value={item.value} total={maxPower} color={item.color} />
         ))}
@@ -268,9 +275,9 @@ function PowerBalance({ snapshot: s, fusion }: { snapshot: Snapshot; fusion: Fus
 
       {/* Output column */}
       <div>
-        <div className="text-[10px] text-gray-600 leading-none mb-1">OUTPUT</div>
+        <div className="text-[10px] text-gray-600 leading-none mb-1">Output</div>
         {outputItems.map((item, i) => (
-          <PowerBar key={i} label={<>P{item.label}</>} value={item.value} total={maxPower} color={item.color} />
+          <PowerBar key={i} label={item.fullLabel ? item.label : <>P{item.label}</>} value={item.value} total={maxPower} color={item.color} />
         ))}
       </div>
 
@@ -517,9 +524,10 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
         </div>
       )}
 
-      {/* Warning indicator for tungsten recrystallization */}
-      {isWarning && (
-        <div className="flex items-center gap-1 mt-0.5">
+      {/* Warning indicator for tungsten recrystallization — always reserve
+          the vertical space so the panel doesn't shift when it appears/disappears. */}
+      {isW && (
+        <div className="flex items-center gap-1 mt-0.5" style={{ minHeight: 14, visibility: isWarning ? 'visible' : 'hidden' }}>
           <span
             className="w-2 h-2 rounded-full shrink-0"
             style={{
@@ -604,14 +612,14 @@ function PowerBar({
   const frac = total > 0 ? Math.min(value / total, 1) : 0
   return (
     <div className="flex items-center gap-1.5 leading-none py-0.5">
-      <span className="text-[10px] text-gray-500 w-8 text-right shrink-0">{label}</span>
+      <span className="text-[10px] text-gray-500 w-10 text-right shrink-0">{label}</span>
       <div className="flex-1 h-2.5 bg-gray-800 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-200"
           style={{ width: `${frac * 100}%`, backgroundColor: color }}
         />
       </div>
-      <span className="text-[10px] text-gray-400 w-8 text-right shrink-0 tabular-nums">
+      <span className="text-[10px] text-gray-400 w-10 text-right shrink-0 tabular-nums">
         {value.toFixed(1)}
       </span>
     </div>

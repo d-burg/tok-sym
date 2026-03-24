@@ -11,6 +11,7 @@ export const simhandle_from_preset: (a: number, b: number, c: number, d: number)
 export const simhandle_is_running: (a: number) => number;
 export const simhandle_new: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const simhandle_reset: (a: number) => void;
+export const simhandle_set_mass_number: (a: number, b: number) => void;
 export const simhandle_status: (a: number) => [number, number];
 export const simhandle_step: (a: number, b: number) => [number, number];
 export const simhandle_time: (a: number) => number;

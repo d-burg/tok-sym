@@ -100,15 +100,18 @@ impl DischargeProgram {
     pub fn standard_hmode(device: &Device) -> Self {
         // Per-device H-mode parameters (Ip, duration, heating, density fraction)
         let (ip_flat, duration, p_nbi, p_ech, p_ich, ne_frac) = match device.id.as_str() {
-            "iter" => (device.ip_max, 100.0, 33.0, 20.0, 0.0, 0.80),
-            "jet"  => (2.5,           20.0,  25.0,  0.0, 4.0, 0.70),
-            _      => (device.ip_max * 0.4, 10.0, 5.0, 0.0, 0.0, 0.60),
+            "iter"    => (device.ip_max, 100.0, 33.0, 20.0, 0.0, 0.80),
+            "jet"     => (2.5,           20.0,  25.0,  0.0, 4.0, 0.70),
+            // CENTAUR: 9.6 MA, 10s pulse, 30 MW ICRH, fGW = 0.61
+            // NT breakeven scenario — operates ELM-free in L-mode/NT regime
+            "centaur" => (device.ip_max, 10.0,  0.0,   0.0, 30.0, 0.61),
+            _         => (device.ip_max * 0.4, 10.0, 5.0, 0.0, 0.0, 0.60),
         };
-        // ITER baseline uses full toroidal field; other devices typically
+        // ITER and CENTAUR use full toroidal field; other devices typically
         // run slightly below max.
         let bt = match device.id.as_str() {
-            "iter" => device.bt_max,
-            _      => device.bt_max * 0.9,
+            "iter" | "centaur" => device.bt_max,
+            _                  => device.bt_max * 0.9,
         };
         let ne_target = device.greenwald_density(ip_flat) * ne_frac;
 
@@ -116,16 +119,19 @@ impl DischargeProgram {
         // ITER: fast ramp (most of 100s is flat-top/burn phase)
         // JET/DIII-D: standard ramp fractions
         let (f_ramp0, f_ramp1, f_end, f_down) = match device.id.as_str() {
-            "iter" => (0.01, 0.08, 0.88, 0.95),
-            _      => (0.05, 0.15, 0.80, 0.90),
+            "iter"    => (0.01, 0.08, 0.88, 0.95),
+            "centaur" => (0.03, 0.12, 0.85, 0.92), // fast ramp for 10s pulse
+            _         => (0.05, 0.15, 0.80, 0.90),
         };
         let (f_heat_on, f_heat_full, f_heat_off0, f_heat_off) = match device.id.as_str() {
-            "iter" => (0.10, 0.12, 0.85, 0.88),
-            _      => (0.20, 0.25, 0.75, 0.80),
+            "iter"    => (0.10, 0.12, 0.85, 0.88),
+            "centaur" => (0.15, 0.18, 0.85, 0.92), // ICRH overlaps ramp-down
+            _         => (0.20, 0.25, 0.75, 0.80),
         };
         let (f_ne0, f_ne1, f_ne_end, f_ne_off) = match device.id.as_str() {
-            "iter" => (0.06, 0.12, 0.88, 0.95),
-            _      => (0.10, 0.20, 0.80, 0.90),
+            "iter"    => (0.06, 0.12, 0.88, 0.95),
+            "centaur" => (0.08, 0.15, 0.85, 0.92),
+            _         => (0.10, 0.20, 0.80, 0.90),
         };
 
         DischargeProgram {
@@ -326,6 +332,7 @@ pub struct SimulationSnapshot {
     pub time: f64,
     pub duration: f64,
     pub device_id: String,
+    pub mass_number: f64,
 
     // Programmed references
     pub prog_ip: f64,
@@ -346,6 +353,7 @@ pub struct SimulationSnapshot {
     pub p_ohmic: f64,
     pub p_rad: f64,
     pub p_loss: f64,
+    pub p_alpha: f64,
     pub beta_n: f64,
     pub beta_t: f64,
     pub q95: f64,
@@ -455,6 +463,9 @@ pub struct Simulation {
     smoothed_f_greenwald: f64,
     smoothed_p_rad_frac: f64,
 
+    // Peak programmed Ip seen during this discharge — used to detect ramp-down
+    peak_prog_ip: f64,
+
     // Smoothed l_i (resistive timescale ~ 200ms)
     smoothed_li: f64,
 
@@ -484,10 +495,11 @@ impl Simulation {
             smoothed_beta_n: 0.0,
             smoothed_f_greenwald: 0.0,
             smoothed_p_rad_frac: 0.0,
+            peak_prog_ip: 0.0,
             smoothed_li: 1.2,
             eq_nr: 48,
             eq_nz: 72,
-            n_flux_surfaces: 8,
+            n_flux_surfaces: 10,
             device,
         }
     }
@@ -508,6 +520,7 @@ impl Simulation {
         self.smoothed_beta_n = 0.0;
         self.smoothed_f_greenwald = 0.0;
         self.smoothed_p_rad_frac = 0.0;
+        self.peak_prog_ip = 0.0;
     }
 
     /// Start or resume the simulation.
@@ -563,10 +576,23 @@ impl Simulation {
         self.smoothed_f_greenwald += (self.transport.f_greenwald - self.smoothed_f_greenwald) * alpha;
         self.smoothed_p_rad_frac += (p_rad_frac - self.smoothed_p_rad_frac) * alpha;
 
+        // Track peak programmed Ip to detect the ramp-down phase.
+        if prog.ip > self.peak_prog_ip {
+            self.peak_prog_ip = prog.ip;
+        }
+
         // Scale threshold with ip_max — avoids spurious Greenwald violations
         // during very early ramp-up in large-bore machines (ITER: n_GW ∝ Ip/a²
         // is tiny at low Ip when a is large).
         let ip_threshold = (0.05 * self.device.ip_max).max(0.1);
+        // During programmed ramp-down, risk factors (radiation fraction, Greenwald
+        // fraction) transiently spike as heating drops faster than stored energy
+        // decays. This is normal controlled termination physics, not a precursor
+        // to uncontrolled disruption.  We still update the risk display but
+        // suppress the stochastic trigger once Ip has dropped below 90% of its
+        // peak (i.e. the programmed ramp-down has begun).
+        let in_rampdown = self.peak_prog_ip > 0.5
+            && prog.ip < 0.9 * self.peak_prog_ip;
         if !self.disruption.disrupted && self.actual_ip > ip_threshold {
             self.disruption.update_risk(
                 self.smoothed_f_greenwald,
@@ -575,7 +601,9 @@ impl Simulation {
                 self.smoothed_p_rad_frac,
                 self.actual_ip,
             );
-            self.disruption.check_trigger(dt);
+            if !in_rampdown {
+                self.disruption.check_trigger(dt);
+            }
         }
 
         // ── Apply disruption effects ──
@@ -649,7 +677,7 @@ impl Simulation {
         };
         let a_param = -0.05 - 0.1 * beta_p.min(2.0); // A shifts with pressure
 
-        let config = if prog.delta < 0.1 {
+        let config = if prog.delta.abs() < 0.1 {
             MagneticConfig::Limited
         } else if let Some(ref cfg_str) = self.program.config_override {
             match cfg_str.as_str() {
@@ -769,8 +797,11 @@ impl Simulation {
                 grid_r_min, grid_r_max, grid_z_min, grid_z_max,
                 self.eq_nr, self.eq_nz,
             );
-            let mut levels: Vec<f64> = (1..=self.n_flux_surfaces)
-                .map(|i| i as f64 / (self.n_flux_surfaces + 1) as f64)
+            // Evenly spaced levels from ψ_N = 0.1 to 0.9, giving uniform
+            // contour spacing from near the magnetic axis to near the edge.
+            let n = self.n_flux_surfaces;
+            let mut levels: Vec<f64> = (0..n)
+                .map(|i| 0.1 + 0.8 * i as f64 / (n - 1).max(1) as f64)
                 .collect();
             // Add a near-edge surface at ψ_N=0.995 for emission shell rendering.
             // The actual separatrix (ψ=0) has figure-eight topology at the X-point
@@ -876,6 +907,7 @@ impl Simulation {
             time: self.time,
             duration: self.program.duration,
             device_id: self.device.id.clone(),
+            mass_number: self.device.mass_number,
             prog_ip: prog.ip,
             prog_bt: prog.bt,
             prog_ne: prog.ne_target,
@@ -892,6 +924,7 @@ impl Simulation {
             p_ohmic: self.transport.p_ohmic,
             p_rad: self.transport.p_rad,
             p_loss: self.transport.p_loss,
+            p_alpha: self.transport.p_alpha,
             beta_n: self.transport.beta_n,
             beta_t: self.transport.beta_t,
             q95: self.transport.q95,

@@ -21,25 +21,25 @@ interface TraceConfig {
 }
 
 const ALL_TRACES: TraceConfig[] = [
-  { key: 'ip',               label: 'Iₚ',      unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
-  { key: 'beta_n',           label: 'βN',       unit: '',         color: '#fbbf24', targetKey: 'beta_n', clampToTarget: true },
-  { key: 'li',               label: 'li',       unit: '',         color: '#38bdf8', yMin: 0, yMax: 1.5 },
-  { key: 'd_alpha',          label: 'Dα',       unit: 'a.u.',     color: '#fb7185' },
-  { key: 'q95',              label: 'q95',      unit: '',         color: '#a78bfa', yMax: 10 },
-  { key: 'h_factor',         label: 'H98',      unit: '',         color: '#34d399' },
-  { key: 'f_greenwald',      label: 'fGW',      unit: '',         color: '#f472b6' },
-  { key: 'ne_bar',           label: 'n̄e',       unit: '10²⁰/m³', color: '#60a5fa' },
-  { key: 'ne_ped',           label: 'ne,ped',   unit: '10²⁰/m³', color: '#818cf8' },
-  { key: 'te0',              label: 'Te0',      unit: 'keV',      color: '#f97316' },
-  { key: 'te_ped',           label: 'Te,ped',   unit: 'keV',      color: '#fb923c' },
-  { key: 'ne_line',          label: 'ne,line',  unit: '10²⁰/m³', color: '#67e8f9' },
-  { key: 'w_th',             label: 'Wth',      unit: 'MJ',       color: '#4ade80' },
-  { key: 'p_input',          label: 'Pin',      unit: 'MW',       color: '#facc15' },
-  { key: 'p_rad',            label: 'Prad',     unit: 'MW',       color: '#e879f9' },
-  { key: 'p_loss',           label: 'Ploss',    unit: 'MW',       color: '#c084fc' },
-  { key: 'v_loop',           label: 'Vloop',    unit: 'V',        color: '#2dd4bf' },
-  { key: 'impurity_fraction',    label: 'fImp',     unit: '%',        color: '#86efac' },
-  { key: 'disruption_risk',  label: 'Drisk',    unit: '',         color: '#ef4444' },
+  { key: 'ip',               label: 'Iₚ',        unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
+  { key: 'beta_n',           label: 'βₙ',        unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
+  { key: 'li',               label: 'lᵢ',        unit: '',         color: '#38bdf8', yMin: 0, yMax: 1.5 },
+  { key: 'd_alpha',          label: 'Dα',        unit: 'a.u.',     color: '#fb7185' },
+  { key: 'q95',              label: 'q₉₅',       unit: '',         color: '#a78bfa', yMax: 10 },
+  { key: 'h_factor',         label: 'H₉₈',       unit: '',         color: '#34d399' },
+  { key: 'f_greenwald',      label: 'fGW',        unit: '',         color: '#f472b6' },
+  { key: 'ne_bar',           label: 'n\u0305ₑ',   unit: '10²⁰/m³', color: '#60a5fa' },
+  { key: 'ne_ped',           label: 'nₑ,ₚₑd',    unit: '10²⁰/m³', color: '#818cf8' },
+  { key: 'te0',              label: 'Tₑ₀',       unit: 'keV',      color: '#f97316' },
+  { key: 'te_ped',           label: 'Tₑ,ₚₑd',   unit: 'keV',      color: '#fb923c' },
+  { key: 'ne_line',          label: 'nₑ,line',   unit: '10²⁰/m³', color: '#67e8f9' },
+  { key: 'w_th',             label: 'Wₜₕ',       unit: 'MJ',       color: '#4ade80' },
+  { key: 'p_input',          label: 'Pᵢₙ',       unit: 'MW',       color: '#facc15' },
+  { key: 'p_rad',            label: 'Pᵣₐd',      unit: 'MW',       color: '#e879f9' },
+  { key: 'p_loss',           label: 'Pₗₒₛₛ',     unit: 'MW',       color: '#c084fc' },
+  { key: 'v_loop',           label: 'Vₗₒₒₚ',     unit: 'V',        color: '#2dd4bf' },
+  { key: 'impurity_fraction',    label: 'fᵢₘₚ',     unit: '%',        color: '#86efac' },
+  { key: 'disruption_risk',  label: 'Dᵣᵢₛₖ',     unit: '',         color: '#ef4444' },
 ]
 
 const DEFAULT_KEYS = new Set(['ip', 'beta_n', 'li', 'd_alpha'])
@@ -259,12 +259,36 @@ export default function UnifiedTracePanel({
         ctx.strokeStyle = cfg.color
         ctx.lineWidth = 2
         ctx.globalAlpha = 0.95
+
+        // For D-alpha, detect ELM spikes (point >> both neighbors) and render
+        // them as vertical lines so they appear as transient events rather
+        // than triangular "tent poles" from the line interpolation.
+        const isElmTrace = cfg.key === 'd_alpha'
+        const spikeThreshold = 3.0 // spike must be 3× the average of neighbors
+
         ctx.beginPath()
         for (let i = 0; i < history.length; i++) {
           const x = toX(history[i].t)
           const y = toY(vals[i])
-          if (i === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
+
+          if (i === 0) {
+            ctx.moveTo(x, y)
+          } else if (isElmTrace && i > 0 && i < history.length - 1) {
+            const prev = vals[i - 1]
+            const next = vals[i + 1]
+            const baseline = (prev + next) / 2
+            if (baseline > 0 && vals[i] > baseline * spikeThreshold) {
+              // ELM spike: draw vertical line up and back down
+              const baseY = toY(baseline)
+              ctx.lineTo(x, baseY)  // continue baseline to spike x
+              ctx.lineTo(x, y)      // vertical up to peak
+              ctx.lineTo(x, baseY)  // vertical back down
+              continue
+            }
+            ctx.lineTo(x, y)
+          } else {
+            ctx.lineTo(x, y)
+          }
         }
         ctx.stroke()
         ctx.globalAlpha = 1

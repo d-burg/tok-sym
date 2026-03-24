@@ -218,9 +218,21 @@ export function computeFusion(snapshot: Snapshot, device: Device): FusionState {
     p_alpha_MW = p_fus_MW - neutron_power_MW  // rest is charged products
   }
 
-  // Q = P_fus / P_heat (external heating)
-  const p_heat = snapshot.p_input  // MW (= P_OH + P_NBI + P_ECH + P_ICH)
-  const q_plasma = p_heat > 0.001 ? p_fus_MW / p_heat : 0
+  // Q = P_fus / P_external (external heating only, excludes alpha self-heating).
+  // snapshot.p_input now includes p_alpha from the Rust transport model,
+  // so subtract it for the standard physics Q definition.
+  //
+  // During ramp-down, P_external drops faster than the thermal energy decays,
+  // causing a nonphysical spike in Q = P_fus / P_ext.  Suppress this by
+  // requiring P_external to be at least 20% of P_input (i.e. alpha power
+  // isn't dominating the denominator) and smoothly ramping Q to zero when
+  // Ip is below 50% of nominal (plasma is no longer in a meaningful state).
+  const p_external = snapshot.p_input - (snapshot.p_alpha ?? 0)
+  const ip_frac = device.ip_max > 0 ? snapshot.ip / device.ip_max : 0
+  const rampdown_fade = Math.min(ip_frac / 0.5, 1.0) // linear fade below 50% Ip
+  const q_plasma = p_external > 1.0
+    ? Math.min(p_fus_MW / p_external, 20) * rampdown_fade
+    : 0
 
   return {
     p_fus: p_fus_MW,
@@ -260,20 +272,67 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
   const B_pol = MU0 * ip_A / (2 * Math.PI * a * Math.sqrt(kappa))
 
   // Eich scaling: λ_q ≈ 1.35 / B_pol^0.9 (mm), with minimum 0.5 mm
-  const lambda_q_m = Math.max(1.35e-3 / Math.pow(B_pol, 0.9), 0.5e-3) // metres
+  let lambda_q_m = Math.max(1.35e-3 / Math.pow(B_pol, 0.9), 0.5e-3) // metres
 
-  // Flux expansion at the divertor target (typical value ~5–10)
-  const f_x = 8.0
+  // Negative triangularity correction: NT plasmas have 1.5–2× wider SOL
+  // due to modified edge magnetic topology (Marinoni et al., Nucl. Fusion 2021).
+  const delta_avg = (device.delta_upper + device.delta_lower) / 2
+  if (delta_avg < -0.1) {
+    // Scale factor: 1.0 at δ=0, up to 2.0 at δ=−0.55
+    const nt_factor = 1.0 + Math.min(Math.abs(delta_avg) / 0.55, 1.0)
+    lambda_q_m *= nt_factor
+  }
+
+  // Device-specific flux expansion at the divertor target.
+  // Standard X-point: f_x ~ 5–10; snowflake divertors: f_x ~ 15–20.
+  // Calibrated so inter-ELM q_peak matches published values:
+  //   JET Mk2-HD:  4–6 MW/m²  (Loarte, JNM 1999; Eich, NF 2013)
+  //   ITER:        ~10 MW/m²   (ITER design basis, iter.org/machine/divertor)
+  //   DIII-D:      3–8 MW/m²   (open lower divertor, lower Ip)
+  const f_x = (() => {
+    switch (device.id) {
+      case 'centaur': return 18  // snowflake-like divertor with high flux expansion
+      case 'iter':    return 8   // standard vertical target
+      case 'jet':     return 12  // Mk2-HD high-delta divertor, good flux expansion
+      case 'diiid':   return 7   // open lower divertor
+      default:        return 8
+    }
+  })()
+
+  // Divertor radiation fraction: fraction of P_SOL radiated in the
+  // SOL/divertor region before reaching the target plates.  The 0D
+  // transport model computes volume-averaged P_rad which underestimates
+  // edge radiation from intrinsic impurities (W sputtering in ILW,
+  // carbon chemical erosion, seeded impurities, etc.).
+  const f_div_rad = (() => {
+    switch (device.id) {
+      case 'jet':     return 0.50  // ILW W sputtering (Huber et al., NF 2013)
+      case 'iter':    return 0.70  // semi-detached divertor operation target
+      case 'diiid':   return 0.35  // carbon chemical sputtering/erosion
+      case 'centaur': return 0.25  // NT geometry, reduced SOL interaction
+      default:        return 0.30
+    }
+  })()
 
   // Wetted area: toroidal ring at major radius times SOL width times expansion
   const A_wet = 2 * Math.PI * R0 * lambda_q_m * f_x  // m²
 
-  // Power crossing the separatrix into the SOL
-  const p_sol = Math.max(snapshot.p_loss, 0)  // MW
-  const p_sol_W = p_sol * 1e6                 // W
+  // Power crossing the separatrix into the SOL.
+  // P_SOL = P_loss − P_rad: only conducted/convected power reaches the divertor;
+  // radiated power is distributed volumetrically and doesn't load the plates.
+  const p_sol = Math.max(snapshot.p_loss - snapshot.p_rad, 0)  // MW
+
+  // Power actually reaching the divertor targets after SOL/divertor radiation.
+  const p_sol_target = p_sol * (1 - f_div_rad)  // MW
+
+  // Double-null power split: in DN configuration, SOL power is shared
+  // approximately equally between upper and lower divertors.
+  const isDN = snapshot.magnetic_config === 'DoubleNull'
+  const p_sol_per_div = isDN ? p_sol_target / 2 : p_sol_target  // MW per divertor set
+  const p_sol_per_div_W = p_sol_per_div * 1e6      // W
 
   // Attached heat flux (Loarte-like factor 2/3 for inner/outer sharing)
-  const q_attached = A_wet > 0 ? 0.67 * p_sol_W / A_wet : 0  // W/m²
+  const q_attached = A_wet > 0 ? 0.67 * p_sol_per_div_W / A_wet : 0  // W/m²
 
   // Detachment correction: higher Greenwald fraction → more radiative
   // divertor → lower target heat flux.  Simple sigmoid model.

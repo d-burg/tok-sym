@@ -41,14 +41,14 @@ export const equilibriumInfo = (
       described by the <b>Grad-Shafranov (GS) equation</b>:
     </p>
     <p className="text-cyan-300 text-center my-1">
-      R&thinsp;&part;/&part;R&thinsp;(R⁻&sup1;&thinsp;&part;&psi;/&part;R) + &part;&sup2;&psi;/&part;Z&sup2;
-      = &minus;&mu;&#x2080;R&sup2;p'(&psi;) &minus; FF'(&psi;)
+      &Delta;*&psi; = &minus;R&thinsp;&mu;&#x2080;&thinsp;j<sub>&phi;</sub>
+      = &minus;&frac12;&thinsp;dF&sup2;/d&psi; &minus; &mu;&#x2080;&thinsp;R&sup2;&thinsp;dP/d&psi;
     </p>
     <p>
       Here <b>&psi;</b> is the poloidal magnetic flux function &mdash;
       its contours define the nested <b>flux surfaces</b> on which
-      plasma properties are constant. The terms <b>p'(&psi;)</b> and{' '}
-      <b>FF'(&psi;)</b> encode the pressure and toroidal field profiles.
+      plasma properties are constant. The term <b>F(&psi;)</b> = RB<sub>&phi;</sub>{' '}
+      encodes the toroidal field profile, and <b>P(&psi;)</b> is the pressure profile.
     </p>
 
     <Heading>Equilibrium Reconstruction</Heading>

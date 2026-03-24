@@ -248,6 +248,56 @@ function computeDepthFades(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * For negative triangularity (outboard X-points), the ψ=0 separatrix has
+ * figure-eight topology with a bridge segment connecting the upper and lower
+ * X-points on the outboard side.  This bridge is invisible for positive-δ
+ * (hidden behind the center stack) but is glaringly visible for negative-δ.
+ *
+ * This function clips the bridge by finding the two contour points closest
+ * to each X-point, breaking the loop, and keeping the longer arc (the actual
+ * plasma-enclosing boundary) while discarding the shorter arc (the bridge).
+ */
+function clipOutboardBridge(
+  pts: [number, number][],
+  xpR: number, xpZ: number,
+  xpUR: number, xpUZ: number,
+  axisR: number,
+): [number, number][] {
+  // Only needed when both X-points are outboard of the magnetic axis
+  if (xpR <= axisR || xpUR <= axisR) return pts
+  if (xpR <= 0 || xpUR <= 0) return pts
+  if (pts.length < 10) return pts
+
+  // Find the contour points closest to each X-point
+  let iLo = 0, iUp = 0
+  let dLo = Infinity, dUp = Infinity
+  for (let i = 0; i < pts.length; i++) {
+    const [r, z] = pts[i]
+    const dl = (r - xpR) ** 2 + (z - xpZ) ** 2
+    const du = (r - xpUR) ** 2 + (z - xpUZ) ** 2
+    if (dl < dLo) { dLo = dl; iLo = i }
+    if (du < dUp) { dUp = du; iUp = i }
+  }
+
+  // Need two distinct break points
+  if (Math.abs(iLo - iUp) < 3) return pts
+
+  // Two arcs between the X-points
+  const i1 = Math.min(iLo, iUp)
+  const i2 = Math.max(iLo, iUp)
+  const arc1 = pts.slice(i1, i2 + 1)
+  const arc2 = [...pts.slice(i2), ...pts.slice(0, i1 + 1)]
+
+  // The plasma-enclosing arc passes through the inboard side (R < axisR);
+  // the bridge arc stays on the outboard side.  Pick the arc whose minimum
+  // R is smaller — that's the one going around the plasma through the
+  // high-field side.
+  const minR1 = Math.min(...arc1.map(p => p[0]))
+  const minR2 = Math.min(...arc2.map(p => p[0]))
+  return minR1 < minR2 ? arc1 : arc2
+}
+
+/**
  * Rebuild separatrix positions and per-vertex baseBrightness into
  * pre-allocated buffers.  Returns the active vertex/index counts.
  */
@@ -258,12 +308,16 @@ function rebuildSepGeometry(
   positions: Float32Array,
   baseBright: Float32Array,
   indices: Uint32Array,
+  xpR = 0, xpZ = 0, xpUR = 0, xpUZ = 0, axisR = 0,
 ): { vertCount: number; idxCount: number } {
   const chains = splitChains(sepPts)
   if (chains.length === 0) return { vertCount: 0, idxCount: 0 }
 
+  // For negative triangularity: clip the outboard bridge from the main chain
+  const clipped = clipOutboardBridge(chains[0], xpR, xpZ, xpUR, xpUZ, axisR)
+
   // Densify, subsample, smooth — the expensive contour pipeline
-  const densified = densifyContour(chains[0], 0.02)
+  const densified = densifyContour(clipped, 0.02)
   const sampled = subsample(densified, SEP_CONTOUR_PTS)
   const mainLoop = smoothContour(sampled, 3)
   const nPts = mainLoop.length
@@ -753,6 +807,7 @@ export function createPlasmaGroup(cfg: PortConfig): PlasmaGroup {
       const result = rebuildSepGeometry(
         cfg, sepPts, camPos,
         sepPositions, sepBaseBright, sepIdxBuf,
+        params.xpointR, params.xpointZ, params.xpointUpperR, params.xpointUpperZ, params.axisR,
       )
       sepVertCount = result.vertCount
       sepIdxCount = result.idxCount

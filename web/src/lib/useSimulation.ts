@@ -36,6 +36,7 @@ export interface SimControls {
   runProgram: (deviceId: string, programJson: string) => void
   setScrubTime: (time: number | null) => void
   setSpeed: (speed: number) => void
+  setMassNumber: (mass: number | null) => void
 }
 
 export function useSimulation(
@@ -47,6 +48,9 @@ export function useSimulation(
   const snapshotHistoryRef = useRef<Snapshot[]>([])
   const runningRef = useRef(false)
   const rafRef = useRef<number>(0)
+  const massOverrideRef = useRef<number | null>(null)
+  const currentDeviceRef = useRef(initialDeviceId)
+  const currentPresetRef = useRef(initialPreset)
   const wallJsonRef = useRef<string>('[]')
   const programJsonRef = useRef<string>('{}')
   const speedRef = useRef(1.0)
@@ -72,21 +76,37 @@ export function useSimulation(
 
   // Create a new sim handle from a preset
   const createSim = useCallback((deviceId: string, preset: PresetId) => {
+    currentDeviceRef.current = deviceId
+    currentPresetRef.current = preset
     // Clean up old handle
     if (simRef.current) {
       simRef.current.free()
     }
-    const handle = SimHandle.from_preset(deviceId, preset)
+
+    // For JET DT, boost heating to match DTE2 campaign conditions
+    // (real JET DTE2 used ~35 MW NBI + 10 MW ICRH = 45 MW total)
+    const isDTOverride = massOverrideRef.current !== null && massOverrideRef.current > 2.0
+    const jetDT = deviceId === 'jet' && isDTOverride && preset === 'hmode'
+
+    let handle: SimHandle
+    let program = getPreset(deviceId, preset)
+
+    if (false) { // eslint-disable-line -- placeholder for future DT program mods
+      handle = SimHandle.from_preset(deviceId, preset)
+    } else {
+      handle = SimHandle.from_preset(deviceId, preset)
+      programJsonRef.current = program ? JSON.stringify(program) : '{}'
+    }
+
+    if (massOverrideRef.current !== null) {
+      handle.set_mass_number(massOverrideRef.current)
+    }
     simRef.current = handle
     historyRef.current = []
     snapshotHistoryRef.current = []
     profileFramesRef.current = []
     lastProfileTimeRef.current = -Infinity
     wallJsonRef.current = handle.wall_outline_json()
-
-    // Get the program JSON for target traces
-    const program = getPreset(deviceId, preset)
-    programJsonRef.current = program ? JSON.stringify(program) : '{}'
 
     runningRef.current = false
     setState({
@@ -113,6 +133,9 @@ export function useSimulation(
       simRef.current.free()
     }
     const handle = new SimHandle(deviceId, programJson)
+    if (massOverrideRef.current !== null) {
+      handle.set_mass_number(massOverrideRef.current)
+    }
     simRef.current = handle
     historyRef.current = []
     snapshotHistoryRef.current = []
@@ -329,6 +352,14 @@ export function useSimulation(
     stepAccRef.current = 0
   }, [])
 
+  const setMassNumber = useCallback((mass: number | null) => {
+    massOverrideRef.current = mass
+    // Recreate the sim with the new fuel — this re-runs createSim which
+    // applies the massOverride after constructing the SimHandle.
+    cancelAnimationFrame(rafRef.current)
+    createSim(currentDeviceRef.current, currentPresetRef.current)
+  }, [createSim])
+
   // Time-based scrubbing: find the closest snapshot by time for equilibrium display.
   // Trace panel uses scrubTime directly for cursor and value readout.
   const setScrubTime = useCallback((time: number | null) => {
@@ -367,8 +398,8 @@ export function useSimulation(
 
   // Memoize controls to keep a stable reference
   const controls = useMemo<SimControls>(
-    () => ({ start, pause, reset, switchPreset, runProgram, setScrubTime, setSpeed }),
-    [start, pause, reset, switchPreset, runProgram, setScrubTime, setSpeed],
+    () => ({ start, pause, reset, switchPreset, runProgram, setScrubTime, setSpeed, setMassNumber }),
+    [start, pause, reset, switchPreset, runProgram, setScrubTime, setSpeed, setMassNumber],
   )
 
   return [state, controls]

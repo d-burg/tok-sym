@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 interface InfoPopupProps {
   children: React.ReactNode
@@ -99,12 +100,12 @@ export default function InfoPopup({ children, title, position = 'right' }: InfoP
         i
       </button>
 
-      {open && coords && (
+      {open && coords && createPortal(
         <div
           ref={popupRef}
           className="fixed w-80 max-h-[70vh] overflow-y-auto
                      bg-gray-950 border border-gray-700 rounded-lg shadow-2xl
-                     p-3 font-mono text-xs z-[100]"
+                     p-3 font-mono text-xs z-[9999]"
           style={{ top: coords.top, left: coords.left }}
         >
           {/* Header */}
@@ -120,10 +121,11 @@ export default function InfoPopup({ children, title, position = 'right' }: InfoP
             </button>
           </div>
           {/* Content */}
-          <div className="text-gray-300 leading-relaxed space-y-2">
+          <div className="info-popup-content text-gray-300 leading-relaxed space-y-2">
             {children}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )

@@ -162,6 +162,13 @@ impl SimHandle {
         format!("{:?}", self.sim.status)
     }
 
+    /// Override the device's fuel mass number (e.g. 2.0 for DD, 2.5 for DT).
+    /// Must be called before starting the simulation (before the first `step`).
+    #[wasm_bindgen]
+    pub fn set_mass_number(&mut self, mass: f64) {
+        self.sim.device.mass_number = mass;
+    }
+
     /// Get the device wall outline as JSON array of [r, z] points.
     #[wasm_bindgen]
     pub fn wall_outline_json(&self) -> String {

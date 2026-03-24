@@ -304,6 +304,11 @@ body {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+/* Don't uppercase info popup body text — it contains physics descriptions */
+[data-theme="modern"] .info-popup-content .text-\[10px\],
+[data-theme="modern"] .info-popup-content .text-\[9px\] {
+  text-transform: none;
+}
 [data-theme="modern"] .text-\[9px\] {
   letter-spacing: 0.04em;
 }

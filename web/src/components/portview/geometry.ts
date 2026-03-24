@@ -39,32 +39,16 @@ export function buildWallGeometry(
   }
   const totalArc = arcLengths[nPts]
 
-  // Port hole test helper — only removes tiles near the correct R.
-  // Uses a small margin (1.15×) beyond the port radius to remove quads
-  // whose centers are just outside the port boundary but whose extent
-  // partially overlaps the viewport (prevents tile occlusion at edges).
+  // Port hole test — only removes tiles for the main camera viewport port.
+  // Extra ports are rendered as decal discs (see buildExtraPortDecals) and
+  // do NOT require wall quad removal.
   const portMargin = 1.15
   const portTest = (R: number, Z: number, phi: number): boolean => {
-    // Main port — must be near the outboard wall (portR)
+    // Main viewport port — must be near the outboard wall (portR)
     if (Math.abs(R - cfg.portR) < cfg.portRadius * 1.5) {
       const dz = Z - cfg.portZ
       const dp = phi - cfg.portPhi
       if (Math.sqrt(dz * dz + dp * dp * R * R) < cfg.portRadius * portMargin) return true
-    }
-    // Extra ports (supports elliptical via zRadius)
-    if (cfg.extraPorts) {
-      for (const ep of cfg.extraPorts) {
-        const zR = ep.zRadius ?? ep.radius
-        const maxR = Math.max(ep.radius, zR)
-        if (Math.abs(R - ep.r) < maxR * 1.5) {
-          const edz = Z - ep.z
-          const edp = phi - ep.phi
-          // Elliptical test: (dz/zR)² + (dphi*R/radius)² < 1
-          const nz = edz / zR
-          const np = edp * ep.r / ep.radius
-          if (Math.sqrt(nz * nz + np * np) < 1) return true
-        }
-      }
     }
     return false
   }
@@ -301,26 +285,128 @@ export function buildPortGeometry(cfg: PortConfig): THREE.BufferGeometry {
 }
 
 /**
- * Build merged cylinder + back-cap geometry for all extra port recesses.
- * Each port gets a short radially-oriented tube so it appears as a dark
- * inset opening on the first wall — matching the look of real diagnostic
- * and heating ports on tokamaks like DIII-D.
+ * Compute the geometric center of a closed (R, Z) limiter contour
+ * from its bounding box.
  */
-export function buildExtraPortCylinders(cfg: PortConfig): THREE.BufferGeometry | null {
+export function contourCenter(pts: [number, number][]): { r: number; z: number } {
+  let rMin = Infinity, rMax = -Infinity
+  let zMin = Infinity, zMax = -Infinity
+  for (const [r, z] of pts) {
+    if (r < rMin) rMin = r
+    if (r > rMax) rMax = r
+    if (z < zMin) zMin = z
+    if (z > zMax) zMax = z
+  }
+  return { r: (rMin + rMax) / 2, z: (zMin + zMax) / 2 }
+}
+
+/**
+ * Sample a point on the limiter contour at a given poloidal angle.
+ *
+ * The angle is measured in degrees from the outboard midplane:
+ *    0° = outboard midplane  (3 o'clock)
+ *   90° = top                (12 o'clock)
+ *  -90° = bottom             (6 o'clock)
+ *  180° = inboard            (9 o'clock)
+ *
+ * Casts a ray from the contour center at the specified angle and
+ * returns the (R, Z) of the first intersection with the contour
+ * boundary.  This is the wall surface.
+ */
+export function sampleContourAtAngle(
+  pts: [number, number][],
+  thetaDeg: number,
+  center?: { r: number; z: number },
+): { r: number; z: number } | null {
+  const c = center ?? contourCenter(pts)
+  const thetaRad = thetaDeg * Math.PI / 180
+
+  // Ray direction in (R, Z) space
+  const dr = Math.cos(thetaRad)
+  const dz = Math.sin(thetaRad)
+
+  // Find the first (closest) intersection with the contour.
+  // For a simple closed contour with the center inside, the first
+  // outward intersection is the wall surface.
+  let bestT = Infinity
+  let bestR = 0
+  let bestZ = 0
+
+  for (let i = 0; i < pts.length; i++) {
+    const ni = (i + 1) % pts.length
+    const [r0, z0] = pts[i]
+    const [r1, z1] = pts[ni]
+
+    // Segment direction
+    const sr = r1 - r0
+    const sz = z1 - z0
+
+    const denom = dr * sz - dz * sr
+    if (Math.abs(denom) < 1e-12) continue
+
+    const t = ((r0 - c.r) * sz - (z0 - c.z) * sr) / denom
+    const u = ((r0 - c.r) * dz - (z0 - c.z) * dr) / denom
+
+    if (t > 1e-6 && u >= 0 && u <= 1 && t < bestT) {
+      bestT = t
+      bestR = c.r + t * dr
+      bestZ = c.z + t * dz
+    }
+  }
+
+  return bestT < Infinity ? { r: bestR, z: bestZ } : null
+}
+
+/**
+ * Find the outboard (maximum) wall R at a given Z by interpolating
+ * the limiter contour. Returns the largest R among all segments that
+ * cross the target Z — this is the outboard wall surface.
+ */
+function findOutboardR(pts: [number, number][], z: number): number {
+  let maxR = 0
+  for (let i = 0; i < pts.length; i++) {
+    const ni = (i + 1) % pts.length
+    const [r0, z0] = pts[i]
+    const [r1, z1] = pts[ni]
+    if ((z0 <= z && z1 >= z) || (z1 <= z && z0 >= z)) {
+      const dz = z1 - z0
+      if (Math.abs(dz) < 1e-10) continue
+      const t = (z - z0) / dz
+      const r = r0 + t * (r1 - r0)
+      if (r > maxR) maxR = r
+    }
+  }
+  return maxR
+}
+
+/**
+ * Build dark circular disc decals for all extra port locations.
+ *
+ * Instead of cutting holes in the wall mesh (which depends on mesh
+ * resolution and distorts tiles), these discs sit ON the wall surface
+ * and use polygonOffset to win the depth test — a "press/pull" decal
+ * approach. Each port is a smooth 32-segment circle completely
+ * independent of wall quad density.
+ *
+ * Port positions are specified as poloidal angles (theta) and resolved
+ * to (R, Z) via ray-casting against the limiter contour. This means
+ * ports automatically follow the actual wall surface at any angle.
+ *
+ * Supports elliptical ports via the zRadius field.
+ */
+export function buildExtraPortDecals(
+  cfg: PortConfig,
+  limiterPts: [number, number][],
+): THREE.BufferGeometry | null {
   const ports = cfg.extraPorts
   if (!ports || ports.length === 0) return null
 
-  const nSeg = 16      // circumferential segments per cylinder
-  const nRing = 3      // rings along depth (front, mid, back)
-  const depth = 0.10   // recess depth in metres
+  // Compute contour center once for all ports
+  const center = contourCenter(limiterPts)
 
-  // Per-port vertex/index budget
-  const tubeVerts = nSeg * nRing
-  const capVerts = nSeg + 1            // center + rim
-  const vertsPerPort = tubeVerts + capVerts
-  const tubeTris = nSeg * (nRing - 1) * 2
-  const capTris = nSeg
-  const trisPerPort = tubeTris + capTris
+  const nSeg = 32      // segments per circle — smooth at any zoom
+  const vertsPerPort = nSeg + 1   // center + rim
+  const trisPerPort = nSeg
 
   const totalVerts = ports.length * vertsPerPort
   const totalIndices = ports.length * trisPerPort * 3
@@ -330,105 +416,73 @@ export function buildExtraPortCylinders(cfg: PortConfig): THREE.BufferGeometry |
   const uvs = new Float32Array(totalVerts * 2)
   const indices = new Uint32Array(totalIndices)
 
-  let vi = 0   // running vertex index
-  let ii = 0   // running index index
+  let vi = 0
+  let ii = 0
 
   for (const port of ports) {
+    // Resolve (R, Z) from poloidal angle via contour ray-casting
+    const hit = sampleContourAtAngle(limiterPts, port.theta, center)
+    if (!hit) continue
+
+    const wallR = hit.r
+    const wallZ = hit.z
     const zR = port.zRadius ?? port.radius
     const baseVert = vi
 
-    // ── Tube rings ──
-    for (let ri = 0; ri < nRing; ri++) {
-      const t = ri / (nRing - 1)           // 0 = wall surface, 1 = back
-      const ringR = port.r + t * depth      // extend outward from wall
+    // Disc normal: points inward (toward magnetic axis) at this phi
+    const nx = -Math.cos(port.phi)
+    const ny = -Math.sin(port.phi)
 
-      for (let si = 0; si < nSeg; si++) {
-        const angle = (si / nSeg) * Math.PI * 2
-        const localZ = Math.cos(angle) * zR
-        const localPhi = Math.sin(angle) * port.radius / ringR
-
-        const v = toroidal(ringR, port.z + localZ, port.phi + localPhi)
-        positions[vi * 3]     = v.x
-        positions[vi * 3 + 1] = v.y
-        positions[vi * 3 + 2] = v.z
-
-        // Normal points inward toward cylinder axis
-        const nx = -Math.cos(port.phi + localPhi) * Math.cos(angle)
-        const ny = -Math.sin(port.phi + localPhi) * Math.cos(angle)
-        const nz = -Math.sin(angle)
-        normals[vi * 3]     = nx
-        normals[vi * 3 + 1] = ny
-        normals[vi * 3 + 2] = nz
-
-        uvs[vi * 2]     = si / nSeg
-        uvs[vi * 2 + 1] = t
-        vi++
-      }
-    }
-
-    // Tube quad indices
-    for (let ri = 0; ri < nRing - 1; ri++) {
-      for (let si = 0; si < nSeg; si++) {
-        const ns = (si + 1) % nSeg
-        const a = baseVert + ri * nSeg + si
-        const b = baseVert + ri * nSeg + ns
-        const c = baseVert + (ri + 1) * nSeg + ns
-        const d = baseVert + (ri + 1) * nSeg + si
-        indices[ii++] = a; indices[ii++] = b; indices[ii++] = c
-        indices[ii++] = a; indices[ii++] = c; indices[ii++] = d
-      }
-    }
-
-    // ── Back cap (disc at the deepest ring) ──
-    const capCenter = vi
-    const capR = port.r + depth
-    const cv = toroidal(capR, port.z, port.phi)
+    // ── Center vertex ──
+    const cv = toroidal(wallR, wallZ, port.phi)
     positions[vi * 3]     = cv.x
     positions[vi * 3 + 1] = cv.y
     positions[vi * 3 + 2] = cv.z
-
-    // Cap normal points inward (toward plasma)
-    const cnx = -Math.cos(port.phi)
-    const cny = -Math.sin(port.phi)
-    normals[vi * 3]     = cnx
-    normals[vi * 3 + 1] = cny
+    normals[vi * 3]     = nx
+    normals[vi * 3 + 1] = ny
     normals[vi * 3 + 2] = 0
     uvs[vi * 2]     = 0.5
-    uvs[vi * 2 + 1] = 1.0
+    uvs[vi * 2 + 1] = 0.5
     vi++
 
-    // Cap rim vertices
+    // ── Rim vertices — each rim point snaps to the wall R at its Z ──
     for (let si = 0; si < nSeg; si++) {
       const angle = (si / nSeg) * Math.PI * 2
       const localZ = Math.cos(angle) * zR
-      const localPhi = Math.sin(angle) * port.radius / capR
+      const rimZ = wallZ + localZ
+      const rimR = findOutboardR(limiterPts, rimZ) || wallR
+      const localPhi = Math.sin(angle) * port.radius / rimR
 
-      const v = toroidal(capR, port.z + localZ, port.phi + localPhi)
+      const v = toroidal(rimR, rimZ, port.phi + localPhi)
       positions[vi * 3]     = v.x
       positions[vi * 3 + 1] = v.y
       positions[vi * 3 + 2] = v.z
-      normals[vi * 3]     = cnx
-      normals[vi * 3 + 1] = cny
+      normals[vi * 3]     = nx
+      normals[vi * 3 + 1] = ny
       normals[vi * 3 + 2] = 0
+      // UVs map (0,0)–(1,1) across disc for radial gradient in shader
       uvs[vi * 2]     = 0.5 + Math.cos(angle) * 0.5
-      uvs[vi * 2 + 1] = 1.0
+      uvs[vi * 2 + 1] = 0.5 + Math.sin(angle) * 0.5
       vi++
     }
 
-    // Cap triangle fan
+    // ── Triangle fan ──
     for (let si = 0; si < nSeg; si++) {
       const ns = (si + 1) % nSeg
-      indices[ii++] = capCenter
-      indices[ii++] = capCenter + 1 + si
-      indices[ii++] = capCenter + 1 + ns
+      indices[ii++] = baseVert              // center
+      indices[ii++] = baseVert + 1 + si     // current rim
+      indices[ii++] = baseVert + 1 + ns     // next rim
     }
   }
 
+  if (vi === 0) return null
+
+  // Trim arrays if some ports were skipped (no contour intersection)
   const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions.subarray(0, vi * 3), 3))
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normals.subarray(0, vi * 3), 3))
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs.subarray(0, vi * 2), 2))
+  geometry.setIndex(new THREE.BufferAttribute(indices.subarray(0, ii), 1))
 
   return geometry
 }

@@ -25,6 +25,11 @@ export class SimHandle {
      */
     reset(): void;
     /**
+     * Override the device's fuel mass number (e.g. 2.0 for DD, 2.5 for DT).
+     * Must be called before starting the simulation (before the first `step`).
+     */
+    set_mass_number(mass: number): void;
+    /**
      * Get the current status as a string.
      */
     status(): string;
@@ -88,6 +93,7 @@ export interface InitOutput {
     readonly simhandle_is_running: (a: number) => number;
     readonly simhandle_new: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly simhandle_reset: (a: number) => void;
+    readonly simhandle_set_mass_number: (a: number, b: number) => void;
     readonly simhandle_status: (a: number) => [number, number];
     readonly simhandle_step: (a: number, b: number) => [number, number];
     readonly simhandle_time: (a: number) => number;

@@ -99,14 +99,16 @@ impl DiagnosticSignals {
         let w_meas = noise.add_noise(w_th, 0.005); // 0.5% noise
         let p_rad_meas = noise.add_noise(p_rad, 0.05); // 5% noise
 
-        // D-alpha: baseline proportional to edge density, spikes during ELMs
-        let d_alpha_base = ne_bar * 0.5 + noise.gaussian(0.02);
+        // D-alpha: baseline proportional to edge density, spikes during ELMs.
+        // Use a multiplicative spike so the ELM amplitude scales uniformly
+        // relative to the baseline across all devices (different ne_bar).
+        let d_alpha_base = (ne_bar * 0.5 + noise.gaussian(0.02)).max(0.01);
         let d_alpha = if elm_type == 1 {
-            // Type I: large distinct spike
-            d_alpha_base + 5.0 + noise.gaussian(1.5)
+            // Type I: spike to ~8× baseline with tight ±5% variance
+            d_alpha_base * (8.0 + noise.gaussian(0.4))
         } else if elm_type == 2 {
-            // Type II: small grassy spike
-            d_alpha_base + 1.0 + noise.gaussian(0.4)
+            // Type II: small grassy spike to ~2.5× baseline
+            d_alpha_base * (2.5 + noise.gaussian(0.2))
         } else {
             d_alpha_base.max(0.0)
         };

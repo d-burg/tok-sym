@@ -12,9 +12,11 @@ import TutorialOverlay from '../components/TutorialOverlay'
 import { DIIID_LIMITER } from '../lib/diiid-geometry'
 import { JET_LIMITER } from '../lib/jet-geometry'
 import { ITER_LIMITER } from '../lib/iter-geometry'
+import { CENTAUR_LIMITER } from '../lib/centaur-geometry'
 
 const DEVICE_LIMITERS: Record<string, [number, number][]> = {
   diiid: DIIID_LIMITER,
+  centaur: CENTAUR_LIMITER,
   jet: JET_LIMITER,
   iter: ITER_LIMITER,
 }
@@ -44,6 +46,7 @@ export default function ControlRoom() {
   const [plannerPreset, setPlannerPreset] = useState<PresetId>(routePreset)
   const [hasCustomProgram, setHasCustomProgram] = useState(false)
   const [configOverride, setConfigOverride] = useState<'LowerSingleNull' | 'DoubleNull' | 'UpperSingleNull' | null>(null)
+  const [fuelType, setFuelType] = useState<'DD' | 'DT'>('DD')
 
   const devices = useMemo(() => getDevices(), [])
 
@@ -68,7 +71,14 @@ export default function ControlRoom() {
     setPlannerDuration(null)
     setHasCustomProgram(false)
     setConfigOverride(null)
+    setFuelType('DD')
+    controls.setMassNumber(null)
     controls.switchPreset(newDeviceId, activePreset)
+  }
+
+  const handleFuelChange = (fuel: 'DD' | 'DT') => {
+    setFuelType(fuel)
+    controls.setMassNumber(fuel === 'DT' ? 2.5 : 2.0)
   }
 
   const handlePresetChange = (newPreset: PresetId) => {
@@ -145,6 +155,28 @@ export default function ControlRoom() {
               </button>
             ))}
           </div>
+
+          {/* DD/DT fuel toggle — JET and ITER */}
+          {(activeDevice === 'jet' || activeDevice === 'iter') && (
+            <>
+              <span className="text-gray-700">|</span>
+              <div className="flex rounded overflow-hidden border border-gray-700">
+                {(['DD', 'DT'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => handleFuelChange(f)}
+                    className={`px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer
+                      ${fuelType === f
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                      }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Playback controls */}
