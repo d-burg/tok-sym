@@ -564,7 +564,10 @@ impl TransportModel {
         let mu0 = 4.0 * std::f64::consts::PI * 1e-7;
         let b_pressure = bt * bt / (2.0 * mu0);
         self.beta_t = (p_avg / b_pressure * 100.0).max(0.0); // percent
-        let raw_beta_n = if ip > 0.05 {
+        // Zero β_N when Ip is below 10% of peak — prevents 1/Ip divergence
+        // at the very end of rampdown when programmed Ip approaches zero.
+        let ip_threshold = if self.ip_peak > 0.5 { self.ip_peak * 0.10 } else { 0.05 };
+        let raw_beta_n = if ip > ip_threshold {
             self.beta_t * a * bt / ip  // %·m·T/MA
         } else {
             0.0

@@ -363,8 +363,8 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
   // Compute the ELM heat flux from stored energy directly (not from p_sol
   // which has already dropped because the Rust model crashed W_th).
   if (snapshot.elm_active && snapshot.in_hmode) {
-    // ELM energy dump: fraction of stored energy deposited on divertor
-    const w_th_MJ = (snapshot.w_th ?? 0)  // MJ
+    // ELM energy dump: fraction of PRE-crash stored energy deposited on divertor.
+    // snapshot.w_th is post-crash, so estimate pre-crash as w_th / (1 - frac).
     const elm_energy_frac = (() => {
       switch (device.id) {
         case 'iter':    return 0.10   // 10% of W_th per Type I ELM
@@ -374,14 +374,16 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
         default:        return 0.07
       }
     })()
-    // ELM duration ~1 ms → power = energy / duration
-    const elm_duration_s = 0.001
-    const elm_power_MW = w_th_MJ * elm_energy_frac / elm_duration_s  // MW
-    // DT plasmas have more stored energy
+    const w_pre_crash = (snapshot.w_th ?? 0) / Math.max(1 - elm_energy_frac, 0.5)
+    const elm_energy_MJ = w_pre_crash * elm_energy_frac  // MJ dumped
+    // ELM duration ~1 ms → transient power
+    const elm_power_MW = elm_energy_MJ / 0.001  // MW
+    // DT plasmas have more stored energy → bigger ELMs
     const isDT = (snapshot.mass_number ?? 2.0) > 2.0
     const dt_factor = isDT ? 1.4 : 1.0
-    // Add ELM power to q_peak (deposited on same wetted area)
-    const elm_q = A_wet > 0 ? (elm_power_MW * dt_factor * 1e6 * 0.67) / A_wet / 1e6 : 0  // MW/m²
+    // ELM heat flux on wetted area (same inner/outer split as inter-ELM)
+    const elm_q = A_wet > 0 ? (elm_power_MW * dt_factor * 0.67 * 1e6) / A_wet / 1e6 : 0  // MW/m²
+    // ELM q_peak REPLACES inter-ELM baseline (it's much higher)
     q_peak = Math.max(q_peak, elm_q)
   }
 
