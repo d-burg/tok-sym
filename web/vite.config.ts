@@ -8,4 +8,7 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['tok-sym-core'],
   },
+  build: {
+    chunkSizeWarningLimit: 1500, // WASM bundle is large; suppress warning
+  },
 })
