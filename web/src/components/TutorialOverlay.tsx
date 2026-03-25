@@ -179,8 +179,7 @@ const STEPS: TutorialStep[] = [
         <p className="mt-2 text-cyan-300 font-semibold text-[11px]">Stability & Disruption Risk</p>
         <p>
           Key stability metrics like <b>q<sub>95</sub></b> (safety factor),
-          <b> β<sub>N</sub></b> (normalized beta), and <b>f<sub>GW</sub></b>
-          (Greenwald fraction) tell you how close the plasma is to known
+          <b> β<sub>N</sub></b> (normalized beta), and <b>f<sub>GW</sub></b> (Greenwald fraction) tell you how close the plasma is to known
           operational limits. Push past these limits and you risk a
           <b> disruption</b> — a sudden, violent loss of confinement where
           the plasma dumps all its energy onto the wall in milliseconds.
