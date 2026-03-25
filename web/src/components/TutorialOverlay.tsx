@@ -676,7 +676,10 @@ function computeCardPosition(
 
   // Clamp helpers
   const clampLeft = (l: number) => Math.max(8, Math.min(l, vw - cardWidth - 8))
-  const clampTop = (t: number) => Math.max(8, Math.min(t, vh - 200))
+  // Estimate card height as ~60% of viewport (cards vary, but 75vh max).
+  // Clamp so the entire card fits within the viewport with 8px margin.
+  const estimatedCardH = Math.min(vh * 0.55, 420)
+  const clampTop = (t: number) => Math.max(8, Math.min(t, vh - estimatedCardH - 8))
 
   switch (step.placement) {
     case 'right': {
