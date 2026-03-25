@@ -5,7 +5,7 @@ import ProfilePanel from './ProfilePanel'
 import InfoPopup from './InfoPopup'
 import { plasmaParamsInfo, stabilityInfo, powerBalanceInfo, divertorInfo, neutronDiagnosticInfo } from './infoContent'
 import { getDevice } from '../lib/wasm'
-import { computeFusion, computeDivertorHeatFlux, formatNeutronRate, formatQ, neutronSignalLevel, type FusionState, type DivertorState } from '../lib/fusionPhysics'
+import { computeFusion, computeDivertorHeatFlux, DivertorThermalModel, formatNeutronRate, formatQ, neutronSignalLevel, type FusionState, type DivertorState } from '../lib/fusionPhysics'
 
 interface Props {
   snapshot: Snapshot | null
@@ -75,10 +75,47 @@ export default function StatusPanel({
     return computeFusion(snapshot, device)
   }, [snapshot, device])
 
-  // Divertor heat flux
+  // Divertor thermal model (stateful — persists across frames)
+  const thermalModelRef = useRef<DivertorThermalModel | null>(null)
+  const prevTimeRef = useRef<number>(0)
+
+  // Reset thermal model when device changes
+  useEffect(() => {
+    if (snapshot?.device_id) {
+      thermalModelRef.current = new DivertorThermalModel(snapshot.device_id)
+      prevTimeRef.current = 0
+    }
+  }, [snapshot?.device_id])
+
+  // Divertor heat flux + 0D thermal temperature
   const divertor = useMemo<DivertorState | null>(() => {
     if (!snapshot || !device) return null
-    return computeDivertorHeatFlux(snapshot, device)
+    const state = computeDivertorHeatFlux(snapshot, device)
+
+    // Advance thermal model
+    let model = thermalModelRef.current
+    if (!model || model['deviceId'] !== device.id) {
+      model = new DivertorThermalModel(device.id)
+      thermalModelRef.current = model
+    }
+
+    const t = snapshot.time ?? 0
+    const dt = t > prevTimeRef.current ? t - prevTimeRef.current : 0
+    prevTimeRef.current = t
+
+    // Reset temperature if plasma is off or time reset
+    if (snapshot.ip < 0.01 || dt < 0 || dt > 2.0) {
+      model.reset()
+    }
+
+    // Step thermal model with applied heat flux
+    if (dt > 0 && dt < 2.0) {
+      state.t_surface = model.step(state.q_peak, dt)
+    } else {
+      state.t_surface = model.t_surface
+    }
+
+    return state
   }, [snapshot, device])
 
   if (!snapshot) {
@@ -443,13 +480,14 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
   const isW = wallMat === 'W'
 
   // ── Heat flux bar ──
-  const maxQ = 25
+  // Dynamic scale: 25 MW/m² normally, expands for large ELM spikes
+  const maxQ = Math.max(25, q * 1.2)
   const fracQ = Math.min(q / maxQ, 1)
   const qBarColor = q > 15 ? '#ef4444' : q > W_RECRYST_QFLUX ? '#f97316' : q > 5 ? '#eab308' : '#22c55e'
 
   // ── Temperature bar (tungsten only) ──
-  // Scale: 0 to 2000 °C
-  const maxTemp = 2000
+  // Dynamic scale: 2000°C normally, expands if ELMs push higher
+  const maxTemp = Math.max(2000, tSurface * 1.2)
   const fracT = Math.min(tSurface / maxTemp, 1)
   const tempBarColor = tSurface > W_RECRYST_TEMP ? '#ef4444' : tSurface > 1000 ? '#f97316' : tSurface > 600 ? '#eab308' : '#22c55e'
   const isTempWarning = isW && tSurface > W_RECRYST_TEMP

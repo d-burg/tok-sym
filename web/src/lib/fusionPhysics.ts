@@ -262,19 +262,133 @@ export function computeFusion(snapshot: Snapshot, device: Device): FusionState {
 // ── Divertor heat flux ──────────────────────────────────────────────
 
 export interface DivertorState {
-  q_peak: number       // Peak heat flux (MW/m²)
+  q_peak: number       // Peak heat flux (MW/m²) — includes ELM transients
+  q_interELM: number   // Inter-ELM baseline heat flux (MW/m²)
   lambda_q: number     // SOL power width (mm)
   p_sol: number        // Power to SOL (MW)
   f_detach: number     // Detachment fraction (0–1)
-  t_surface: number    // Estimated divertor surface temperature (°C)
+  t_surface: number    // Divertor surface temperature (°C) — from 0D thermal model
   wall_material: 'W' | 'C'  // Tungsten or Carbon wall
+  elm_q: number        // ELM-only heat flux contribution (MW/m²)
+}
+
+/**
+ * 0D divertor thermal model.  Integrates surface temperature using:
+ *
+ *   C_th × dT/dt = q_applied − q_cooling − q_radiation
+ *
+ * where C_th is the thermal capacitance of the armor tile (ρ × c_p × L),
+ * q_applied is the incident heat flux, q_cooling is active water cooling
+ * (ITER only) or inter-shot water cooling (JET/DIII-D ≈ 0 during pulse),
+ * and q_radiation is Stefan-Boltzmann radiative cooling from the surface.
+ *
+ * This gives realistic thermal evolution: temperature rises through the
+ * discharge, spikes during ELMs, and recovers between ELMs.
+ */
+export class DivertorThermalModel {
+  t_surface: number   // Current surface temperature (°C)
+  private deviceId: string
+
+  // Material properties
+  private rho: number       // Density (kg/m³)
+  private cp: number        // Specific heat (J/kg/K)
+  private armor_L: number   // Armor thickness (m)
+  private C_th: number      // Thermal capacitance per unit area (J/m²/K)
+  private T_coolant: number // Coolant temperature (°C)
+  private h_cool: number    // Active cooling HTC (W/m²/K), 0 = inertial
+
+  constructor(deviceId: string) {
+    this.deviceId = deviceId
+    this.t_surface = this.ambientTemp(deviceId)
+
+    if (deviceId === 'diiid') {
+      // Carbon/graphite PFCs — inertially cooled during pulse
+      this.rho = 1800        // graphite density (kg/m³)
+      this.cp = 710          // specific heat at ~500°C (J/kg/K)
+      this.armor_L = 0.020   // 20 mm tile thickness
+      this.T_coolant = 25    // room temp water (between shots only)
+      this.h_cool = 0        // no active cooling during pulse
+    } else if (deviceId === 'iter') {
+      // ITER tungsten monoblocks — actively water-cooled
+      // CuCrZr cooling pipe, 4 MPa pressurized water, 16 m/s flow
+      this.rho = 19350       // tungsten density (kg/m³)
+      this.cp = 135          // W specific heat at ~500°C (J/kg/K)
+      this.armor_L = 0.006   // 6 mm armor thickness
+      this.T_coolant = 100   // pressurized water inlet ~100°C
+      this.h_cool = 30000    // effective HTC through W + Cu interlayer (W/m²/K)
+                             // ~100 kW/m²/K at pipe, reduced by armor conduction
+    } else if (deviceId === 'jet') {
+      // JET ILW — bulk W lamellae, inertially cooled during pulse
+      this.rho = 19350
+      this.cp = 135
+      this.armor_L = 0.006   // thin W lamellae
+      this.T_coolant = 25
+      this.h_cool = 0        // inertial cooling only
+    } else {
+      // CENTAUR (conceptual) — assume actively cooled like ITER
+      this.rho = 19350
+      this.cp = 135
+      this.armor_L = 0.006
+      this.T_coolant = 80
+      this.h_cool = 25000
+    }
+
+    this.C_th = this.rho * this.cp * this.armor_L  // J/m²/K
+  }
+
+  private ambientTemp(id: string): number {
+    switch (id) {
+      case 'diiid': return 25   // room temperature
+      case 'jet':   return 200  // JET baked at 200°C
+      case 'iter':  return 100  // ITER coolant pre-heats to ~100°C
+      default:      return 80
+    }
+  }
+
+  /** Reset to ambient when starting a new discharge or switching device */
+  reset(): void {
+    this.t_surface = this.ambientTemp(this.deviceId)
+  }
+
+  /**
+   * Advance the thermal model by dt seconds with applied heat flux q_in (MW/m²).
+   * Returns the updated surface temperature.
+   */
+  step(q_in_MW: number, dt: number): number {
+    const q_in = q_in_MW * 1e6  // MW/m² → W/m²
+
+    // Active cooling: Newton's law q_cool = h × (T_surface - T_coolant)
+    const q_cool = this.h_cool * Math.max(this.t_surface - this.T_coolant, 0)
+
+    // Radiative cooling: Stefan-Boltzmann (significant above ~1000°C)
+    const sigma = 5.67e-8  // W/m²/K⁴
+    const eps = 0.3        // emissivity (W ~ 0.3, C ~ 0.8)
+    const T_K = this.t_surface + 273.15
+    const T_amb_K = this.T_coolant + 273.15
+    const q_rad = sigma * eps * (T_K * T_K * T_K * T_K - T_amb_K * T_amb_K * T_amb_K * T_amb_K)
+
+    // dT/dt = (q_in - q_cool - q_rad) / C_th
+    const dTdt = (q_in - q_cool - q_rad) / this.C_th
+
+    // Forward Euler integration, clamped for stability
+    this.t_surface += dTdt * Math.min(dt, 0.1)
+
+    // Floor at ambient
+    this.t_surface = Math.max(this.t_surface, this.ambientTemp(this.deviceId))
+
+    return this.t_surface
+  }
 }
 
 /**
  * Estimate divertor peak heat flux using Eich scaling for the SOL
  * power width and a simple detachment model based on Greenwald fraction.
+ * ELM heat flux computed from Loarte scaling (ΔW_ELM ~ fraction of W_stored).
  *
- * Reference: T. Eich et al., Nucl. Fusion 53, 093031 (2013).
+ * References:
+ *   T. Eich et al., Nucl. Fusion 53, 093031 (2013) — SOL width
+ *   A. Loarte et al., PPCF 45, 1549 (2003) — ELM energy scaling
+ *   Pitts et al., JNM 2009 — JET ELM loads
  */
 export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): DivertorState {
   const MU0 = 4 * Math.PI * 1e-7
@@ -290,141 +404,120 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
   let lambda_q_m = Math.max(1.35e-3 / Math.pow(B_pol, 0.9), 0.5e-3) // metres
 
   // Negative triangularity correction: NT plasmas have 1.5–2× wider SOL
-  // due to modified edge magnetic topology (Marinoni et al., Nucl. Fusion 2021).
   const delta_avg = (device.delta_upper + device.delta_lower) / 2
   if (delta_avg < -0.1) {
-    // Scale factor: 1.0 at δ=0, up to 2.0 at δ=−0.55
     const nt_factor = 1.0 + Math.min(Math.abs(delta_avg) / 0.55, 1.0)
     lambda_q_m *= nt_factor
   }
 
-  // Device-specific flux expansion at the divertor target.
-  // Standard X-point: f_x ~ 5–10; snowflake divertors: f_x ~ 15–20.
-  // Calibrated so inter-ELM q_peak matches published values:
-  //   JET Mk2-HD:  4–6 MW/m²  (Loarte, JNM 1999; Eich, NF 2013)
-  //   ITER:        ~10 MW/m²   (ITER design basis, iter.org/machine/divertor)
-  //   DIII-D:      3–8 MW/m²   (open lower divertor, lower Ip)
+  // Device-specific flux expansion at the divertor target
   const f_x = (() => {
     switch (device.id) {
-      case 'centaur': return 18  // snowflake-like divertor with high flux expansion
+      case 'centaur': return 18  // snowflake-like divertor
       case 'iter':    return 8   // standard vertical target
-      case 'jet':     return 12  // Mk2-HD high-delta divertor, good flux expansion
+      case 'jet':     return 12  // Mk2-HD high-delta divertor
       case 'diiid':   return 7   // open lower divertor
       default:        return 8
     }
   })()
 
-  // Divertor radiation fraction: fraction of P_SOL radiated in the
-  // SOL/divertor region before reaching the target plates.  The 0D
-  // transport model computes volume-averaged P_rad which underestimates
-  // edge radiation from intrinsic impurities (W sputtering in ILW,
-  // carbon chemical erosion, seeded impurities, etc.).
+  // Divertor radiation fraction
   const f_div_rad = (() => {
     switch (device.id) {
-      case 'jet':     return 0.50  // ILW W sputtering (Huber et al., NF 2013)
-      case 'iter':    return 0.70  // semi-detached divertor operation target
-      case 'diiid':   return 0.35  // carbon chemical sputtering/erosion
-      case 'centaur': return 0.25  // NT geometry, reduced SOL interaction
+      case 'jet':     return 0.50
+      case 'iter':    return 0.70
+      case 'diiid':   return 0.35
+      case 'centaur': return 0.25
       default:        return 0.30
     }
   })()
 
-  // Wetted area: toroidal ring at major radius times SOL width times expansion
+  // Wetted area: toroidal ring × SOL width × flux expansion
   const A_wet = 2 * Math.PI * R0 * lambda_q_m * f_x  // m²
 
-  // Power crossing the separatrix into the SOL.
-  // P_SOL = P_loss − P_rad: only conducted/convected power reaches the divertor;
-  // radiated power is distributed volumetrically and doesn't load the plates.
+  // Power crossing the separatrix
   const p_sol = Math.max(snapshot.p_loss - snapshot.p_rad, 0)  // MW
+  const p_sol_target = p_sol * (1 - f_div_rad)
 
-  // Power actually reaching the divertor targets after SOL/divertor radiation.
-  const p_sol_target = p_sol * (1 - f_div_rad)  // MW
-
-  // Double-null power split: in DN configuration, SOL power is shared
-  // approximately equally between upper and lower divertors.
+  // Double-null split
   const isDN = snapshot.magnetic_config === 'DoubleNull'
-  const p_sol_per_div = isDN ? p_sol_target / 2 : p_sol_target  // MW per divertor set
-  const p_sol_per_div_W = p_sol_per_div * 1e6      // W
+  const p_sol_per_div = isDN ? p_sol_target / 2 : p_sol_target
+  const p_sol_per_div_W = p_sol_per_div * 1e6
 
-  // Attached heat flux (Loarte-like factor 2/3 for inner/outer sharing)
+  // Inter-ELM attached heat flux (2/3 inner/outer sharing)
   const q_attached = A_wet > 0 ? 0.67 * p_sol_per_div_W / A_wet : 0  // W/m²
 
-  // Detachment correction: higher Greenwald fraction → more radiative
-  // divertor → lower target heat flux.  Simple sigmoid model.
+  // Detachment correction
   const f_GW = snapshot.f_greenwald
   const f_detach = Math.min(1 - 1 / (1 + Math.pow(f_GW / 0.7, 6)), 0.97)
 
-  // Peak heat flux at the divertor target (inter-ELM baseline)
-  let q_peak = q_attached * (1 - f_detach) / 1e6  // W/m² → MW/m²
+  // Inter-ELM baseline heat flux
+  const q_interELM = q_attached * (1 - f_detach) / 1e6  // MW/m²
 
-  // ── ELM transient heat flux spike ──
-  // Type I ELMs expel 5-15% of pedestal stored energy in ~0.5-1 ms,
-  // creating a transient heat pulse independent of the inter-ELM baseline.
-  // Compute the ELM heat flux from stored energy directly (not from p_sol
-  // which has already dropped because the Rust model crashed W_th).
+  // ── ELM transient heat flux ──────────────────────────────
+  // Published ELM energy and heat flux values (Loarte 2003, Pitts 2009):
+  //   DIII-D:  ΔW_ELM ~ 10–55 kJ,  q_ELM ~ 10–25 MW/m²
+  //   JET:     ΔW_ELM ~ 100–900 kJ, q_ELM ~ 50–200 MW/m² (perp)
+  //   ITER:    ΔW_ELM ~ 5–22 MJ,    q_ELM ~ unmitigated would be catastrophic
+  //
+  // Model: ΔW_ELM = f_ELM × W_stored, deposited on 2× λ_q wetted area
+  // over ~0.5–1 ms timescale.
+  let elm_q = 0  // MW/m²
   if (snapshot.elm_active && snapshot.in_hmode) {
-    // ELM energy dump: fraction of PRE-crash stored energy deposited on divertor.
-    // snapshot.w_th is post-crash, so estimate pre-crash as w_th / (1 - frac).
-    const elm_energy_frac = (() => {
+    // Device-specific ELM energy fraction (% of W_stored)
+    const f_elm = (() => {
       switch (device.id) {
-        case 'iter':    return 0.10   // 10% of W_th per Type I ELM
-        case 'jet':     return 0.08   // 8%
-        case 'diiid':   return 0.06   // 6%
+        case 'diiid':   return 0.05   // 5%: 10–55 kJ from 0.5–1.5 MJ
+        case 'jet':     return 0.08   // 8%: 100–600 kJ from 4–8 MJ
+        case 'iter':    return 0.06   // 6%: 5–22 MJ from ~350 MJ
         case 'centaur': return 0.0    // NT-edge: no ELMs
-        default:        return 0.07
+        default:        return 0.06
       }
     })()
-    const w_pre_crash = (snapshot.w_th ?? 0) / Math.max(1 - elm_energy_frac, 0.5)
-    const elm_energy_MJ = w_pre_crash * elm_energy_frac  // MJ dumped
-    // ELM duration ~1 ms → transient power
-    const elm_power_MW = elm_energy_MJ / 0.001  // MW
-    // DT plasmas have more stored energy → bigger ELMs
-    const isDT = (snapshot.mass_number ?? 2.0) > 2.0
-    const dt_factor = isDT ? 1.4 : 1.0
-    // ELM heat flux on wetted area (same inner/outer split as inter-ELM)
-    const elm_q = A_wet > 0 ? (elm_power_MW * dt_factor * 0.67 * 1e6) / A_wet / 1e6 : 0  // MW/m²
-    // ELM q_peak REPLACES inter-ELM baseline (it's much higher)
-    q_peak = Math.max(q_peak, elm_q)
+
+    // ELM deposition timescale (seconds)
+    const tau_elm = (() => {
+      switch (device.id) {
+        case 'diiid':   return 0.001  // 1 ms
+        case 'jet':     return 0.0004 // 0.4 ms (faster crash)
+        case 'iter':    return 0.0005 // 0.5 ms (projected)
+        default:        return 0.001
+      }
+    })()
+
+    // Pre-crash W_th (snapshot is post-crash)
+    const w_pre = (snapshot.w_th ?? 0) / Math.max(1 - f_elm, 0.5)
+    const dW_elm = w_pre * f_elm  // MJ
+
+    // ELM broadened wetted area (ELMs deposit on ~2× the inter-ELM λ_q)
+    const A_wet_elm = 2 * Math.PI * R0 * lambda_q_m * 2.0 * f_x
+
+    // Transient ELM power
+    const P_elm = dW_elm / tau_elm  // MW
+
+    // 60% of ELM energy goes to outer target
+    elm_q = A_wet_elm > 0 ? (P_elm * 0.60 * 1e6) / A_wet_elm / 1e6 : 0  // MW/m²
+
+    // DT has more stored energy → bigger ELMs
+    if ((snapshot.mass_number ?? 2.0) > 2.0) elm_q *= 1.3
   }
 
-  // Wall material: DIII-D is carbon; JET (ILW) and ITER are tungsten divertors
-  // DIII-D uses carbon/graphite PFCs; JET (ILW) and ITER use tungsten divertors
+  // Total peak heat flux: inter-ELM baseline + ELM spike
+  const q_peak = Math.max(q_interELM, 0) + elm_q
+
   const wall_material: 'W' | 'C' = device.id === 'diiid' ? 'C' : 'W'
 
-  // Estimate divertor surface temperature from heat flux.
-  // Simplified 1D thermal model: T_surface ≈ T_coolant + q_peak · (L / k)
-  // where L is the armor thickness and k is thermal conductivity.
-  //
-  // For tungsten monoblock (ITER-like):
-  //   k_W ≈ 110 W/(m·K) at 500°C, L ≈ 6 mm, T_coolant ≈ 150°C
-  //   T_surface ≈ 150 + q(MW/m²) × 6e-3 / 110 × 1e6 ≈ 150 + 54.5 × q
-  //
-  // For carbon (DIII-D): k_C ≈ 80 W/(m·K), L ≈ 20 mm, T_coolant ≈ 25°C
-  //   T_surface ≈ 25 + q(MW/m²) × 20e-3 / 80 × 1e6 ≈ 25 + 250 × q
-  //
-  // Add a radiation background of ~200°C during H-mode from divertor recycling.
-  const q_MW = Math.max(q_peak, 0)
-  let t_surface: number
-  if (wall_material === 'W') {
-    const T_coolant = 150  // °C (pressurised water)
-    const thermal_resistance = 55  // °C per MW/m² (6mm W armor)
-    t_surface = T_coolant + thermal_resistance * q_MW
-    // Add radiative/recycling background during active plasma
-    if (snapshot.ip > 0.01) t_surface += 150
-  } else {
-    const T_coolant = 25  // °C (room-temp water for DIII-D)
-    const thermal_resistance = 250  // °C per MW/m² (thicker carbon tiles)
-    t_surface = T_coolant + thermal_resistance * q_MW
-    if (snapshot.ip > 0.01) t_surface += 100
-  }
-
+  // Temperature is computed externally by DivertorThermalModel.step()
+  // Pass 0 here; the StatusPanel will overwrite with the thermal model's value.
   return {
     q_peak: Math.max(q_peak, 0),
+    q_interELM: Math.max(q_interELM, 0),
     lambda_q: lambda_q_m * 1000,  // m → mm
     p_sol,
     f_detach,
-    t_surface,
+    t_surface: 0,  // filled in by DivertorThermalModel
     wall_material,
+    elm_q: Math.max(elm_q, 0),
   }
 }
 

@@ -461,10 +461,10 @@ export default function UnifiedTracePanel({
       const x = toX(t)
       ctx.fillText(`${t.toFixed(0)}`, x, totalH - 12)
     }
-    // X-axis unit label
+    // X-axis unit label — to the left of the first tick
     ctx.textAlign = 'right'
     ctx.fillStyle = '#4b5563'
-    ctx.fillText('[seconds]', toX(tMax), totalH - 1)
+    ctx.fillText('[sec]', toX(0) - 4, totalH - 12)
   }, [history, duration, targets, scrubTime, elmActive, activeTraces, isModern, isRetro])
 
   // Redraw on data changes
