@@ -108,9 +108,10 @@ export default function StatusPanel({
       model.reset()
     }
 
-    // Step thermal model with applied heat flux
+    // Step thermal model: inter-ELM baseline sustained for dt,
+    // ELM heat deposited as short impulse (tau_elm << dt)
     if (dt > 0 && dt < 2.0) {
-      state.t_surface = model.step(state.q_peak, dt)
+      state.t_surface = model.step(state.q_interELM, state.elm_q, state.tau_elm, dt)
     } else {
       state.t_surface = model.t_surface
     }

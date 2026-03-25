@@ -270,6 +270,7 @@ export interface DivertorState {
   t_surface: number    // Divertor surface temperature (°C) — from 0D thermal model
   wall_material: 'W' | 'C'  // Tungsten or Carbon wall
   elm_q: number        // ELM-only heat flux contribution (MW/m²)
+  tau_elm: number      // ELM deposition timescale (seconds)
 }
 
 /**
@@ -302,35 +303,47 @@ export class DivertorThermalModel {
     this.t_surface = this.ambientTemp(deviceId)
 
     if (deviceId === 'diiid') {
-      // Carbon/graphite PFCs — inertially cooled during pulse
+      // Carbon/graphite PFCs — inertially cooled during pulse.
+      // Graphite cp increases with temperature (~710 at RT, ~1800 at 1000°C).
+      // Use effective average ~1200 J/kg/K for the operating range.
+      // Target: 400–600°C at 5 MW/m² after 3 s pulse.
       this.rho = 1800        // graphite density (kg/m³)
-      this.cp = 710          // specific heat at ~500°C (J/kg/K)
-      this.armor_L = 0.020   // 20 mm tile thickness
+      this.cp = 1200         // effective average specific heat (J/kg/K)
+      this.armor_L = 0.025   // 25 mm effective tile + substrate thickness
       this.T_coolant = 25    // room temp water (between shots only)
       this.h_cool = 0        // no active cooling during pulse
     } else if (deviceId === 'iter') {
-      // ITER tungsten monoblocks — actively water-cooled
-      // CuCrZr cooling pipe, 4 MPa pressurized water, 16 m/s flow
+      // ITER tungsten monoblocks — actively water-cooled.
+      // Full thermal resistance: 6 mm W armor (k drops from 170→110 at 1000°C)
+      // + 1 mm Cu interlayer + CuCrZr pipe wall + convective HTC.
+      // Effective h_cool reduced to match published T_surface ~ 1200–1500°C
+      // at 10 MW/m² steady-state (ITER design basis).
       this.rho = 19350       // tungsten density (kg/m³)
-      this.cp = 135          // W specific heat at ~500°C (J/kg/K)
+      this.cp = 150          // W specific heat ~150 J/kg/K at operating temp
       this.armor_L = 0.006   // 6 mm armor thickness
       this.T_coolant = 100   // pressurized water inlet ~100°C
-      this.h_cool = 30000    // effective HTC through W + Cu interlayer (W/m²/K)
-                             // ~100 kW/m²/K at pipe, reduced by armor conduction
+      this.h_cool = 8500     // effective HTC through full W→Cu→CuCrZr→water path
+                             // tuned to give ~1300°C at 10 MW/m² steady-state
     } else if (deviceId === 'jet') {
-      // JET ILW — bulk W lamellae, inertially cooled during pulse
+      // JET ILW — bulk W lamellae on CFC substrate, inertially cooled.
+      // The full thermal stack (W lamellae + CFC carrier + support) has
+      // much larger effective thermal mass than the 6 mm W alone.
+      // Target: 600–1000°C at 5–8 MW/m² mid-pulse (5–10 s).
+      // JOI operational limit: 1200°C.
       this.rho = 19350
-      this.cp = 135
-      this.armor_L = 0.006   // thin W lamellae
-      this.T_coolant = 25
+      this.cp = 150
+      this.armor_L = 0.022   // 22 mm effective thermal depth (W lamellae + CFC substrate)
+      this.T_coolant = 200   // JET vessel baked at 200°C
       this.h_cool = 0        // inertial cooling only
     } else {
-      // CENTAUR (conceptual) — assume actively cooled like ITER
+      // CENTAUR (conceptual) — actively cooled W monoblocks, similar to ITER
+      // but with slightly better cooling from advanced design.
+      // Target: ~800–1000°C at nominal heat flux.
       this.rho = 19350
-      this.cp = 135
+      this.cp = 150
       this.armor_L = 0.006
       this.T_coolant = 80
-      this.h_cool = 25000
+      this.h_cool = 15000
     }
 
     this.C_th = this.rho * this.cp * this.armor_L  // J/m²/K
@@ -351,27 +364,44 @@ export class DivertorThermalModel {
   }
 
   /**
-   * Advance the thermal model by dt seconds with applied heat flux q_in (MW/m²).
-   * Returns the updated surface temperature.
+   * Advance the thermal model by dt seconds.
+   *
+   * @param q_base_MW  Inter-ELM baseline heat flux (MW/m²) — sustained for dt
+   * @param elm_q_MW   ELM transient heat flux (MW/m²) — applied as impulse
+   * @param tau_elm    ELM duration (seconds) — how long the ELM flux lasts
+   * @param dt         Simulation timestep (seconds)
+   *
+   * The ELM heat is deposited as a short impulse: the energy is
+   * elm_q × tau_elm, regardless of the simulation timestep dt.
+   * This prevents the temperature from swinging wildly when dt >> tau_elm.
    */
-  step(q_in_MW: number, dt: number): number {
-    const q_in = q_in_MW * 1e6  // MW/m² → W/m²
+  step(q_base_MW: number, elm_q_MW: number, tau_elm: number, dt: number): number {
+    if (dt <= 0 || dt > 2.0) return this.t_surface
 
-    // Active cooling: Newton's law q_cool = h × (T_surface - T_coolant)
+    const q_base = q_base_MW * 1e6  // W/m²
+
+    // ── Sub-step 1: ELM impulse (if active) ──
+    // Deposit ELM energy as a fixed thermal impulse: ΔT = q_elm × tau_elm / C_th
+    if (elm_q_MW > 0 && tau_elm > 0) {
+      const q_elm = elm_q_MW * 1e6  // W/m²
+      const dT_elm = (q_elm * tau_elm) / this.C_th
+      this.t_surface += dT_elm
+    }
+
+    // ── Sub-step 2: Inter-ELM baseline for full dt ──
+    // Active cooling: Newton's law
     const q_cool = this.h_cool * Math.max(this.t_surface - this.T_coolant, 0)
 
     // Radiative cooling: Stefan-Boltzmann (significant above ~1000°C)
     const sigma = 5.67e-8  // W/m²/K⁴
-    const eps = 0.3        // emissivity (W ~ 0.3, C ~ 0.8)
+    const eps = this.deviceId === 'diiid' ? 0.8 : 0.3  // C ~ 0.8, W ~ 0.3
     const T_K = this.t_surface + 273.15
     const T_amb_K = this.T_coolant + 273.15
-    const q_rad = sigma * eps * (T_K * T_K * T_K * T_K - T_amb_K * T_amb_K * T_amb_K * T_amb_K)
+    const q_rad = sigma * eps * (T_K ** 4 - T_amb_K ** 4)
 
-    // dT/dt = (q_in - q_cool - q_rad) / C_th
-    const dTdt = (q_in - q_cool - q_rad) / this.C_th
-
-    // Forward Euler integration, clamped for stability
-    this.t_surface += dTdt * Math.min(dt, 0.1)
+    // dT/dt = (q_base - q_cool - q_rad) / C_th
+    const dTdt = (q_base - q_cool - q_rad) / this.C_th
+    this.t_surface += dTdt * dt
 
     // Floor at ambient
     this.t_surface = Math.max(this.t_surface, this.ambientTemp(this.deviceId))
@@ -462,6 +492,16 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
   //
   // Model: ΔW_ELM = f_ELM × W_stored, deposited on 2× λ_q wetted area
   // over ~0.5–1 ms timescale.
+  // ELM deposition timescale (device-specific, seconds)
+  const elm_tau = (() => {
+    switch (device.id) {
+      case 'diiid':   return 0.001  // 1 ms
+      case 'jet':     return 0.0004 // 0.4 ms (faster crash)
+      case 'iter':    return 0.0005 // 0.5 ms (projected)
+      default:        return 0.001
+    }
+  })()
+
   let elm_q = 0  // MW/m²
   if (snapshot.elm_active && snapshot.in_hmode) {
     // Device-specific ELM energy fraction (% of W_stored)
@@ -475,16 +515,6 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
       }
     })()
 
-    // ELM deposition timescale (seconds)
-    const tau_elm = (() => {
-      switch (device.id) {
-        case 'diiid':   return 0.001  // 1 ms
-        case 'jet':     return 0.0004 // 0.4 ms (faster crash)
-        case 'iter':    return 0.0005 // 0.5 ms (projected)
-        default:        return 0.001
-      }
-    })()
-
     // Pre-crash W_th (snapshot is post-crash)
     const w_pre = (snapshot.w_th ?? 0) / Math.max(1 - f_elm, 0.5)
     const dW_elm = w_pre * f_elm  // MJ
@@ -492,8 +522,8 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
     // ELM broadened wetted area (ELMs deposit on ~2× the inter-ELM λ_q)
     const A_wet_elm = 2 * Math.PI * R0 * lambda_q_m * 2.0 * f_x
 
-    // Transient ELM power
-    const P_elm = dW_elm / tau_elm  // MW
+    // Transient ELM power: ΔW_ELM / τ_ELM
+    const P_elm = dW_elm / elm_tau  // MW
 
     // 60% of ELM energy goes to outer target
     elm_q = A_wet_elm > 0 ? (P_elm * 0.60 * 1e6) / A_wet_elm / 1e6 : 0  // MW/m²
@@ -518,6 +548,7 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
     t_surface: 0,  // filled in by DivertorThermalModel
     wall_material,
     elm_q: Math.max(elm_q, 0),
+    tau_elm: elm_tau,
   }
 }
 
