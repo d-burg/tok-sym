@@ -192,7 +192,7 @@ const STEPS: TutorialStep[] = [
           <b> Q<sub>plasma</sub></b> — the ratio of fusion power produced to
           heating power supplied. Q = 1 is "breakeven"; Q = 10 is the
           ITER target. On smaller machines running D-D fuel, Q will be
-          tiny — but on ITER with D-T fuel, it's the whole game.
+          tiny — but on ITER with D-T fuel, the energy of the reactions puts us in a regime where generating electricity from fusion becomes a possibility.
         </p>
       </>
     ),

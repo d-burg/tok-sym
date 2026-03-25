@@ -265,7 +265,7 @@ export default function ControlRoom() {
               </span>
             )}
           </div>
-          <SettingsDropdown />
+          <SettingsDropdown onRestartTutorial={() => setTutorialActive(true)} />
         </div>
       </div>
 
