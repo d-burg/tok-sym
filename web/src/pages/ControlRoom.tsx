@@ -55,7 +55,8 @@ export default function ControlRoom() {
   const [plannerPreset, setPlannerPreset] = useState<PresetId>(routePreset)
   const [hasCustomProgram, setHasCustomProgram] = useState(false)
   const [configOverride, setConfigOverride] = useState<'LowerSingleNull' | 'DoubleNull' | 'UpperSingleNull' | null>(null)
-  const [fuelType, setFuelType] = useState<'DD' | 'DT'>('DD')
+  const defaultFuel = (id: string): 'DD' | 'DT' => (id === 'iter' || id === 'jet') ? 'DT' : 'DD'
+  const [fuelType, setFuelType] = useState<'DD' | 'DT'>(defaultFuel(activeDevice))
 
   const devices = useMemo(() => getDevices(), [])
 
@@ -69,6 +70,14 @@ export default function ControlRoom() {
     scrubTime,
     finished,
   } = state
+
+  // Set initial fuel type for devices that default to DT
+  useEffect(() => {
+    const fuel = defaultFuel(activeDevice)
+    if (fuel === 'DT') {
+      controls.setMassNumber(2.5)
+    }
+  }, [activeDevice]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const time = displaySnapshot?.time ?? 0
   // Extract duration from snapshot, or fall back to the program's duration
@@ -90,8 +99,9 @@ export default function ControlRoom() {
     setPlannerDuration(null)
     setHasCustomProgram(false)
     setConfigOverride(null)
-    setFuelType('DD')
-    controls.setMassNumber(null)
+    const fuel = defaultFuel(newDeviceId)
+    setFuelType(fuel)
+    controls.setMassNumber(fuel === 'DT' ? 2.5 : null)
     controls.switchPreset(newDeviceId, activePreset)
   }
 
@@ -137,15 +147,15 @@ export default function ControlRoom() {
   return (
     <div className="h-screen flex flex-col bg-[#0a0e17] overflow-hidden">
       {/* ─── Top bar ─── */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 gap-2">
-        {/* Device & preset selectors */}
-        <div className="flex items-center gap-1.5 shrink-0">
+      <div className="flex flex-wrap items-center justify-between px-2 sm:px-3 py-1 sm:py-1.5 border-b border-gray-800 gap-1 sm:gap-2">
+        {/* Device, Scenario, Fuel selectors */}
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {/* Device selector */}
           <select
             value={activeDevice}
             onChange={(e) => handleDeviceChange(e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-cyan-400 text-xs font-bold
-                       rounded px-1.5 py-1 cursor-pointer hover:border-cyan-600
+            className="bg-gray-800 border border-gray-700 text-cyan-400 text-[11px] sm:text-xs font-bold
+                       rounded px-1 sm:px-1.5 py-1 cursor-pointer hover:border-cyan-600
                        focus:outline-none focus:border-cyan-500 transition-colors"
           >
             {devices.map((d) => (
@@ -155,55 +165,47 @@ export default function ControlRoom() {
             ))}
           </select>
 
-          <span className="text-gray-700">|</span>
-
-          {/* Preset selector as button group */}
-          <div className="flex rounded overflow-hidden border border-gray-700">
+          {/* Scenario selector (replaces button group) */}
+          <select
+            value={activePreset}
+            onChange={(e) => handlePresetChange(e.target.value as PresetId)}
+            className="bg-gray-800 border border-gray-700 text-amber-400 text-[11px] sm:text-xs font-bold
+                       rounded px-1 sm:px-1.5 py-1 cursor-pointer hover:border-amber-600
+                       focus:outline-none focus:border-amber-500 transition-colors"
+          >
             {getPresets(activeDevice).map((p) => (
-              <button
-                key={p.id}
-                onClick={() => handlePresetChange(p.id)}
-                className={`px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer
-                  ${
-                    activePreset === p.id
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                  }`}
-              >
+              <option key={p.id} value={p.id}>
                 {p.label}
-              </button>
+              </option>
             ))}
-          </div>
+          </select>
 
           {/* DD/DT fuel toggle — JET and ITER */}
           {(activeDevice === 'jet' || activeDevice === 'iter') && (
-            <>
-              <span className="text-gray-700">|</span>
-              <div className="flex rounded overflow-hidden border border-gray-700">
-                {(['DD', 'DT'] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => handleFuelChange(f)}
-                    className={`px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer
-                      ${fuelType === f
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                      }`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </>
+            <div className="flex rounded overflow-hidden border border-gray-700">
+              {(['DD', 'DT'] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => handleFuelChange(f)}
+                  className={`px-1.5 sm:px-2 py-1 text-[10px] sm:text-[11px] font-semibold transition-colors cursor-pointer
+                    ${fuelType === f
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                    }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
         {/* Playback controls */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5">
           {!running ? (
             <button
               onClick={controls.start}
-              className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-xs font-semibold
+              className="px-2 sm:px-3 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-[11px] sm:text-xs font-semibold
                          transition-colors cursor-pointer flex items-center gap-1"
             >
               ▶ Start
@@ -211,7 +213,7 @@ export default function ControlRoom() {
           ) : (
             <button
               onClick={controls.pause}
-              className="px-3 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold
+              className="px-2 sm:px-3 py-1 bg-amber-600 hover:bg-amber-500 rounded text-[11px] sm:text-xs font-semibold
                          transition-colors cursor-pointer flex items-center gap-1"
             >
               ⏸ Pause
@@ -220,10 +222,10 @@ export default function ControlRoom() {
           {!(running && hasCustomProgram) && (
             <button
               onClick={controls.reset}
-              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold
+              className="px-2 sm:px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] sm:text-xs font-semibold
                          transition-colors cursor-pointer"
             >
-              {hasCustomProgram ? '↺ Reset Machine' : '↺ Reset'}
+              {hasCustomProgram ? '↺ Reset' : '↺ Reset'}
             </button>
           )}
 
@@ -233,7 +235,7 @@ export default function ControlRoom() {
               <button
                 key={s}
                 onClick={() => handleSpeedChange(s)}
-                className={`px-1.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer
+                className={`px-1 sm:px-1.5 py-1 text-[10px] sm:text-[11px] font-semibold transition-colors cursor-pointer
                   ${
                     activeSpeed === s
                       ? 'bg-gray-600 text-white'
@@ -245,22 +247,23 @@ export default function ControlRoom() {
             ))}
           </div>
 
-          {/* Edit Program button — always visible */}
+          {/* Edit Program button */}
           <button
             onClick={() => setShowPlanner(!showPlanner)}
-            className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-[11px] font-semibold
+            className="px-1.5 sm:px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-[10px] sm:text-[11px] font-semibold
                        transition-colors cursor-pointer flex items-center gap-1"
           >
-            {showPlanner ? '✕ Close' : '📋 Edit'}
+            {showPlanner ? '✕' : '📋'}
+            <span className="hidden sm:inline">{showPlanner ? 'Close' : 'Edit'}</span>
           </button>
         </div>
 
         {/* Time readout + Settings */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="font-mono text-xs text-gray-400 tabular-nums whitespace-nowrap">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <div className="font-mono text-[10px] sm:text-xs text-gray-400 tabular-nums whitespace-nowrap">
             t={time.toFixed(3)}s / {duration.toFixed(1)}s
             {finished && (
-              <span className="ml-1 text-[10px] text-gray-600">
+              <span className="ml-1 text-[9px] sm:text-[10px] text-gray-600">
                 {scrubTime !== null ? '(scrub)' : '(done)'}
               </span>
             )}
@@ -270,7 +273,8 @@ export default function ControlRoom() {
       </div>
 
       {/* ─── Main grid ─── */}
-      <div className="flex-1 grid grid-cols-[1fr_1.5fr_1fr] grid-rows-[1.1fr_1fr] gap-2 p-2 min-h-0">
+      <div className="flex-1 overflow-x-auto">
+      <div className="min-w-[768px] h-full grid grid-cols-[1fr_1.5fr_1fr] grid-rows-[1.1fr_1fr] gap-2 p-2 min-h-0">
         {/* Top-left: Equilibrium cross-section (single cell) */}
         <div data-tutorial="equilibrium" className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
           <EquilibriumCanvas snapshot={displaySnapshot} wallJson={wallJson} limiterPoints={limiterPoints} />
@@ -314,6 +318,7 @@ export default function ControlRoom() {
             deviceA={devices.find(d => d.id === activeDevice)?.a}
           />
         </div>
+      </div>
       </div>
 
       {/* ─── Progress bar ─── */}

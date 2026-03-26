@@ -182,18 +182,37 @@ export function useSimulation(
     let snap: Snapshot | null = null
     // Track peak Dα and any ELM across all sub-steps so that ELMs
     // are reliably captured even when many physics steps are skipped.
+    // The simulation runs multiple steps per animation frame; an ELM
+    // might fire on step 1 and its cooldown expire by step 3, so the
+    // final snapshot would show elm_active=false. Latching here ensures
+    // every ELM triggers the label, portview flash, and divertor spike.
     let maxDAlpha = 0
+    let anyElmActive = false
+    let elmEnergyLoss = 0
+    let elmType = 0
 
     for (let i = 0; i < stepsThisFrame; i++) {
       const json = sim.step(DT)
       snap = JSON.parse(json)
       if (snap) {
         if (snap.diagnostics.d_alpha > maxDAlpha) maxDAlpha = snap.diagnostics.d_alpha
+        if (snap.elm_active) {
+          anyElmActive = true
+          elmType = snap.elm_type ?? elmType
+          elmEnergyLoss = Math.max(snap.elm_energy_loss ?? 0, elmEnergyLoss)
+        }
       }
       if (snap && (snap.status === 'Complete' || snap.status === 'Disrupted')) {
         runningRef.current = false
         break
       }
+    }
+
+    // Patch the final snapshot with latched ELM state from any sub-step
+    if (snap && anyElmActive) {
+      snap.elm_active = true
+      if (elmType) snap.elm_type = elmType
+      if (elmEnergyLoss) snap.elm_energy_loss = elmEnergyLoss
     }
 
     if (snap) {

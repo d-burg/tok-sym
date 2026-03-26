@@ -90,6 +90,46 @@ const REFERENCES: Ref[] = [
     doi: '10.1016/j.nme.2017.03.005',
   },
   {
+    id: 'loarte2003',
+    authors: 'A. Loarte et al.',
+    title: 'Characteristics of type I ELM energy and particle losses in existing devices and their extrapolation to ITER',
+    journal: 'Plasma Phys. Control. Fusion 45, 1549',
+    year: 2003,
+    doi: '10.1088/0741-3335/45/9/302',
+  },
+  {
+    id: 'cordey1999',
+    authors: 'J. G. Cordey et al.',
+    title: 'Plasma confinement in JET H-mode plasmas with H, D, DT and T isotopes',
+    journal: 'Nucl. Fusion 39, 301',
+    year: 1999,
+    doi: '10.1088/0029-5515/39/3/301',
+  },
+  {
+    id: 'marinoni2021',
+    authors: 'A. Marinoni et al.',
+    title: 'H-mode grade confinement in L-mode edge plasmas at negative triangularity on DIII-D',
+    journal: 'Nucl. Fusion 61, 116010',
+    year: 2021,
+    doi: '10.1088/1741-4326/ac1f04',
+  },
+  {
+    id: 'hirai2018',
+    authors: 'T. Hirai et al.',
+    title: 'ITER full tungsten divertor qualification program and progress',
+    journal: 'Fusion Eng. Des. 127, 66',
+    year: 2018,
+    doi: '10.1016/j.fusengdes.2017.12.003',
+  },
+  {
+    id: 'matthews2013',
+    authors: 'G. F. Matthews et al.',
+    title: 'JET ITER-like wall — overview and experimental programme',
+    journal: 'J. Nucl. Mater. 438, S2',
+    year: 2013,
+    doi: '10.1016/j.jnucmat.2013.01.282',
+  },
+  {
     id: 'wesson2011',
     authors: 'J. Wesson',
     title: 'Tokamaks',
@@ -243,6 +283,18 @@ export default function Bibliography() {
             This empirical scaling is a multi-machine regression fit to a database of tokamak
             experiments. The negative exponent on power reflects the degradation of confinement
             with increasing heating — a fundamental feature of turbulent plasma transport.
+          </p>
+          <p>
+            <strong>D-T isotope enhancement:</strong> D-T plasmas receive a 1.35× confinement
+            enhancement beyond the IPB98 M<sup>0.19</sup> scaling, representing the improved core
+            confinement observed in JET DTE2 and TFTR D-T campaigns. This is attributed to alpha
+            heating profile peaking and reduced turbulent transport.<RefTag id="cordey1999" />
+          </p>
+          <p>
+            <strong>Negative triangularity:</strong> For NT configurations (CENTAUR), a 1.05×
+            confinement boost is applied, with an intermediate H-factor between L-mode and H-mode
+            (~0.82), representing the ELM-free enhanced confinement regime observed
+            experimentally.<RefTag id="marinoni2021" />
           </p>
         </Section>
 
@@ -455,20 +507,45 @@ export default function Bibliography() {
         </Section>
 
         {/* ─── 14. Divertor Surface Temperature ─── */}
-        <Section number={14} title="Divertor Surface Temperature (1D Thermal Model)">
+        <Section number={14} title="Divertor Surface Temperature (0D Lumped Thermal Model)">
           <p>
-            The divertor surface temperature is computed from a 1D steady-state heat conduction
-            model through the tungsten armor:
+            The divertor surface temperature is computed using a 0D lumped thermal capacitance model
+            that evolves in time:<RefTag id="hirai2018" /><RefTag id="matthews2013" />
           </p>
           <Eq>
-            {'T_surface = T_coolant + q_surface · (t_armor / k_W + 1 / h_coolant)'}
+            {'C_th · dT/dt = q_total − h_cool · (T − T_coolant)'}
           </Eq>
           <p>
-            where <em>k_W</em> ≈ 130 W/m/K is the tungsten thermal conductivity (temperature-dependent),
-            <em> t_armor</em> is the armor thickness, and <em>h_coolant</em> is the coolant heat transfer
-            coefficient. Recrystallization of tungsten occurs above ~1200°C, which degrades its
-            mechanical integrity — a key constraint on divertor lifetime.
+            where <em>C_th = ρ · c_p · L</em> is the thermal capacitance per unit area (J/m²/K),
+            <em> q_total</em> is the total heat flux (inter-ELM + ELM transients),
+            <em> h_cool</em> is the effective heat transfer coefficient to the coolant, and
+            <em> T_coolant</em> is the coolant temperature. For inertially cooled devices
+            (DIII-D, JET), h_cool = 0 and the temperature rises monotonically during the pulse.
+            For actively cooled devices (ITER, CENTAUR), the temperature equilibrates at
+            T_eq = T_coolant + q / h_cool.
           </p>
+          <p>
+            Device-specific thermal parameters are calibrated against published values:
+            DIII-D carbon tiles reach ~300-600°C during 3 s pulses; JET ILW tungsten
+            reaches ~600-1000°C during 8 s pulses (JOI operational limit: 1200°C);
+            ITER actively-cooled tungsten monoblocks equilibrate at ~1200-1500°C under
+            10 MW/m² steady-state heat flux.
+          </p>
+          <p>
+            ELM heat flux transients are added as impulses using the Loarte energy scaling
+            (Section 19) deposited over a characteristic ELM crash time of ~0.5-1.0 ms.<RefTag id="loarte2003" />
+          </p>
+          <div className="mt-3 px-3 py-2 bg-amber-900/20 border border-amber-700/30 rounded text-amber-200/80 text-xs leading-relaxed">
+            <strong className="text-amber-300">Known limitation — single-layer approximation:</strong>{' '}
+            The model treats the divertor armor as a single thermal lump with uniform temperature.
+            In reality, ELM energy deposits in a very thin surface skin (~0.1 mm thermal diffusion
+            depth at τ_ELM ~ 1 ms). This means ELM temperature spikes are underestimated (the real
+            surface during an unmitigated Type I ELM on ITER can transiently exceed tungsten's melting
+            point of 3422°C), and the temperature recovery is too slow (real surface cools in ~10-100 ms,
+            not seconds). The inter-ELM steady-state temperatures are well-calibrated against published values.
+            Tungsten recrystallization occurs above ~1200°C, degrading mechanical integrity — a key
+            constraint on divertor lifetime.
+          </div>
         </Section>
 
         {/* ─── 15. Profiles: H-mode ─── */}
