@@ -323,30 +323,28 @@ export default function UnifiedTracePanel({
         // adjacent elevated points from ELM latching don't inflate the baseline.
         const isElmTrace = cfg.key === 'd_alpha'
         let isSpike: boolean[] | null = null
-        if (isElmTrace && vals.length > 2) {
+        if (isElmTrace && vals.length > 4) {
+          // Compute a global inter-ELM baseline: sort all values and take the
+          // median. ELM spikes are outliers above the baseline Dα level.
+          const sorted = [...vals].sort((a, b) => a - b)
+          const globalBaseline = sorted[Math.floor(sorted.length * 0.5)] || 0
+
           isSpike = new Array(vals.length).fill(false)
-          // First pass: detect spikes using 25th-percentile baseline from ±4 window
-          for (let i = 1; i < vals.length - 1; i++) {
-            const neighbors: number[] = []
-            for (let j = Math.max(0, i - 4); j <= Math.min(vals.length - 1, i + 4); j++) {
-              if (j !== i) neighbors.push(vals[j])
+          if (globalBaseline > 0) {
+            // Mark any point > 1.8× the global median as a spike
+            for (let i = 1; i < vals.length - 1; i++) {
+              if (vals[i] > globalBaseline * 1.8) {
+                isSpike[i] = true
+              }
             }
-            neighbors.sort((a, b) => a - b)
-            const baseline = neighbors[Math.floor(neighbors.length * 0.25)] || 0
-            if (baseline > 0 && vals[i] > baseline * 2.0) {
-              isSpike[i] = true
-            }
-          }
-          // Second pass: deduplicate adjacent spikes — keep only the tallest
-          // point in each consecutive run, so each ELM renders as a single
-          // vertical line instead of doubled-up tent poles.
-          for (let i = 1; i < vals.length; i++) {
-            if (isSpike[i] && isSpike[i - 1]) {
-              // Two adjacent spikes: keep the taller one, suppress the other
-              if (vals[i] >= vals[i - 1]) {
-                isSpike[i - 1] = false
-              } else {
-                isSpike[i] = false
+            // Deduplicate: in each run of adjacent spikes, keep only the tallest
+            for (let i = 1; i < vals.length; i++) {
+              if (isSpike[i] && isSpike[i - 1]) {
+                if (vals[i] >= vals[i - 1]) {
+                  isSpike[i - 1] = false
+                } else {
+                  isSpike[i] = false
+                }
               }
             }
           }
