@@ -281,8 +281,10 @@ function PowerBalance({ snapshot: s, fusion }: { snapshot: Snapshot; fusion: Fus
   if (s.prog_p_ich > 0.01) {
     inputItems.push({ label: <><sub>ICH</sub></>, value: s.prog_p_ich, color: '#f59e0b' })
   }
-  if (isDT && pAlpha > 0.01) {
-    inputItems.push({ label: <><sub>α</sub></>, value: pAlpha, color: '#10b981' })
+  // Alpha heating bar: always present for DT (shows 0 before fusion onset),
+  // so the panel layout doesn't shift when alpha power appears mid-discharge.
+  if (isDT) {
+    inputItems.push({ label: <><sub>&alpha;</sub></>, value: pAlpha, color: '#10b981' })
   }
 
   // Total input = external + alpha (for DT, alpha heats the plasma)

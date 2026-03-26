@@ -597,6 +597,15 @@ export const powerBalanceInfo = (
       localized heating and current drive. Used for NTM stabilization
       and sawtooth control.
     </p>
+    <Heading>P<sub>&alpha;</sub> &mdash; Alpha Heating (D-T only)</Heading>
+    <p>
+      Self-heating from 3.52 MeV alpha particles produced by D-T fusion
+      reactions. The alphas are confined by the magnetic field and
+      thermalize in the plasma, transferring their energy to the bulk
+      ions and electrons. This is the key term that enables Q &gt; 1:
+      when P<sub>&alpha;</sub> exceeds the external heating, the plasma
+      approaches ignition. Shown only for D-T fuel.
+    </p>
     <Heading>P<sub>rad</sub> &mdash; Radiated Power</Heading>
     <p>
       Power lost through bremsstrahlung, cyclotron radiation, and line

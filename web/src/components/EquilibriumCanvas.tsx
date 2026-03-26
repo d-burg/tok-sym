@@ -323,9 +323,30 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     if (snapshot) {
       const labelX = 8
       let labelY = H - 22
-      ctx.fillText(`q₉₅ = ${snapshot.q95.toFixed(2)}`, labelX, labelY)
+      // q95: render "q" then subscript "95" at smaller font to avoid
+      // awkward spacing from Unicode subscript digits in monospace fonts.
+      const q95Val = ` = ${snapshot.q95.toFixed(2)}`
+      ctx.fillText('q', labelX, labelY)
+      const qW = ctx.measureText('q').width
+      ctx.save()
+      ctx.font = isRetro ? '8px "VCR OSD Mono", "Courier New", monospace' : '8px monospace'
+      ctx.fillText('95', labelX + qW, labelY + 3)
+      const subW = ctx.measureText('95').width
+      ctx.restore()
+      ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : '11px monospace'
+      ctx.fillText(q95Val, labelX + qW + subW, labelY)
       labelY -= 16
-      ctx.fillText(`βN = ${snapshot.beta_n.toFixed(2)}`, labelX, labelY)
+      // βN: render "β" then subscript "N"
+      const bnVal = ` = ${snapshot.beta_n.toFixed(2)}`
+      ctx.fillText('\u03B2', labelX, labelY)
+      const betaW = ctx.measureText('\u03B2').width
+      ctx.save()
+      ctx.font = isRetro ? '8px "VCR OSD Mono", "Courier New", monospace' : '8px monospace'
+      ctx.fillText('N', labelX + betaW, labelY + 3)
+      const nW = ctx.measureText('N').width
+      ctx.restore()
+      ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : '11px monospace'
+      ctx.fillText(bnVal, labelX + betaW + nW, labelY)
       labelY -= 16
       if (snapshot.in_hmode) {
         ctx.fillStyle = labelHighlight

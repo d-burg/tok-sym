@@ -314,11 +314,32 @@ export default function UnifiedTracePanel({
         ctx.lineWidth = isRetro ? 1.5 : 2
         ctx.globalAlpha = 0.95
 
-        // For D-alpha, detect ELM spikes (point >> both neighbors) and render
-        // them as vertical lines so they appear as transient events rather
-        // than triangular "tent poles" from the line interpolation.
+        // For D-alpha, detect ELM spikes and render them as perfectly vertical
+        // lines (up and back down at the same x) so they appear as transient
+        // events rather than triangular "tent poles".
+        //
+        // Pre-compute a local baseline for each point using a wider window
+        // (±3 points, excluding the point itself and any spikes) so that
+        // adjacent elevated points from ELM latching don't inflate the baseline.
         const isElmTrace = cfg.key === 'd_alpha'
-        const spikeThreshold = 3.0 // spike must be 3× the average of neighbors
+        let isSpike: boolean[] | null = null
+        if (isElmTrace && vals.length > 2) {
+          isSpike = new Array(vals.length).fill(false)
+          // First pass: compute median-like baseline from wider neighborhood
+          for (let i = 1; i < vals.length - 1; i++) {
+            // Gather nearby non-spike values in a ±4 window
+            const neighbors: number[] = []
+            for (let j = Math.max(0, i - 4); j <= Math.min(vals.length - 1, i + 4); j++) {
+              if (j !== i) neighbors.push(vals[j])
+            }
+            neighbors.sort((a, b) => a - b)
+            // Use 25th percentile as baseline (resistant to adjacent spikes)
+            const baseline = neighbors[Math.floor(neighbors.length * 0.25)] || 0
+            if (baseline > 0 && vals[i] > baseline * 2.0) {
+              isSpike[i] = true
+            }
+          }
+        }
 
         ctx.beginPath()
         for (let i = 0; i < history.length; i++) {
@@ -327,19 +348,17 @@ export default function UnifiedTracePanel({
 
           if (i === 0) {
             ctx.moveTo(x, y)
-          } else if (isElmTrace && i > 0 && i < history.length - 1) {
-            const prev = vals[i - 1]
-            const next = vals[i + 1]
-            const baseline = (prev + next) / 2
-            if (baseline > 0 && vals[i] > baseline * spikeThreshold) {
-              // ELM spike: draw vertical line up and back down
-              const baseY = toY(baseline)
-              ctx.lineTo(x, baseY)  // continue baseline to spike x
-              ctx.lineTo(x, y)      // vertical up to peak
-              ctx.lineTo(x, baseY)  // vertical back down
-              continue
+          } else if (isSpike && isSpike[i]) {
+            // ELM spike: draw as vertical line at this x position
+            // Find baseline Y from previous non-spike point
+            let baseVal = vals[i - 1]
+            for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+              if (!isSpike[j]) { baseVal = vals[j]; break }
             }
-            ctx.lineTo(x, y)
+            const baseY = toY(baseVal)
+            ctx.lineTo(x, baseY)  // continue baseline to spike x
+            ctx.lineTo(x, y)      // vertical up to peak
+            ctx.lineTo(x, baseY)  // vertical back down
           } else {
             ctx.lineTo(x, y)
           }
@@ -464,7 +483,7 @@ export default function UnifiedTracePanel({
     // X-axis unit label — to the left of the first tick
     ctx.textAlign = 'right'
     ctx.fillStyle = '#4b5563'
-    ctx.fillText('[sec]', toX(0) - 4, totalH - 12)
+    ctx.fillText('[sec]', toX(0) - 12, totalH - 12)
   }, [history, duration, targets, scrubTime, elmActive, activeTraces, isModern, isRetro])
 
   // Redraw on data changes
