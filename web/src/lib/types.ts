@@ -58,6 +58,8 @@ export interface Snapshot {
   h_factor: number
   in_hmode: boolean
   elm_active: boolean
+  elm_type?: number
+  elm_energy_loss?: number
   elm_suppressed: boolean
   ne_ped: number
   te_ped: number

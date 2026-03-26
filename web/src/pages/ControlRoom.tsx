@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useSimulation } from '../lib/useSimulation'
 import { getDevices, type PresetId } from '../lib/wasm'
