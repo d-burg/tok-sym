@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   getDevice,
@@ -50,7 +50,9 @@ function getPresets(deviceId: string) {
   return deviceId === 'centaur' ? CENTAUR_PRESETS : ALL_PRESETS
 }
 
-// ── Mini sparkline canvas for a waveform ─────────────────────────
+// ── Mini sparkline SVG for a waveform ────────────────────────────
+// Uses a wide viewBox (600px) to minimize aspect ratio distortion
+// when the SVG is scaled to fill its container.
 function Sparkline({
   points,
   duration,
@@ -62,65 +64,26 @@ function Sparkline({
   color?: string
   height?: number
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    const container = containerRef.current
-    if (!canvas || !container || points.length < 2) return
-
-    const rect = container.getBoundingClientRect()
-    const w = Math.round(rect.width * devicePixelRatio)
-    const h = Math.round(height * devicePixelRatio)
-    canvas.width = w
-    canvas.height = h
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    ctx.clearRect(0, 0, w, h)
-
-    const vals = points.map((p) => p[1])
-    const vMin = Math.min(...vals, 0)
-    const vMax = Math.max(...vals) * 1.1 || 1
-
-    const toX = (t: number) => (t / duration) * w
-    const toY = (v: number) => h - ((v - vMin) / (vMax - vMin)) * h
-
-    ctx.strokeStyle = color
-    ctx.lineWidth = 1.5 * devicePixelRatio
-    ctx.lineJoin = 'round'
-    ctx.lineCap = 'round'
-    ctx.beginPath()
-    for (let i = 0; i < points.length; i++) {
-      const x = toX(points[i][0])
-      const y = toY(points[i][1])
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-  }, [points, duration, color, height])
-
-  // Re-draw on resize
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    const ro = new ResizeObserver(() => {
-      // trigger redraw by changing a dummy state — or just re-run the effect
-      const canvas = canvasRef.current
-      if (canvas) canvas.width = 0 // force redraw on next effect
-    })
-    ro.observe(container)
-    return () => ro.disconnect()
-  }, [])
-
   if (points.length < 2) return null
 
+  const vals = points.map((p) => p[1])
+  const vMin = Math.min(...vals, 0)
+  const vMax = Math.max(...vals) * 1.1 || 1
+
+  const w = 600 // wide viewBox to match typical rendered aspect ratio
+  const h = height
+  const pad = 2
+  const toX = (t: number) => pad + (t / duration) * (w - 2 * pad)
+  const toY = (v: number) => pad + (h - 2 * pad) - ((v - vMin) / (vMax - vMin)) * (h - 2 * pad)
+
+  const d = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p[0]).toFixed(1)} ${toY(p[1]).toFixed(1)}`)
+    .join(' ')
+
   return (
-    <div ref={containerRef} className="w-full" style={{ height }}>
-      <canvas ref={canvasRef} className="w-full" style={{ height, display: 'block' }} />
-    </div>
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
+      <path d={d} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   )
 }
 

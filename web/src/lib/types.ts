@@ -118,6 +118,7 @@ export interface TracePoint {
   ne_line: number
   impurity_fraction: number
   elm_suppressed: boolean
+  elm_active?: boolean
 }
 
 /** Raw profile frame captured every 50ms during simulation. */

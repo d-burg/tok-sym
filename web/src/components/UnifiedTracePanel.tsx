@@ -322,29 +322,24 @@ export default function UnifiedTracePanel({
         // (±3 points, excluding the point itself and any spikes) so that
         // adjacent elevated points from ELM latching don't inflate the baseline.
         const isElmTrace = cfg.key === 'd_alpha'
+        // For Dα, use the elm_active flag from the simulation to identify
+        // ELM spikes directly — no heuristic threshold needed.
+        // Deduplicate adjacent flagged points to render one vertical line per ELM.
         let isSpike: boolean[] | null = null
-        if (isElmTrace && vals.length > 4) {
-          // Compute a global inter-ELM baseline: sort all values and take the
-          // median. ELM spikes are outliers above the baseline Dα level.
-          const sorted = [...vals].sort((a, b) => a - b)
-          const globalBaseline = sorted[Math.floor(sorted.length * 0.5)] || 0
-
-          isSpike = new Array(vals.length).fill(false)
-          if (globalBaseline > 0) {
-            // Mark any point > 1.8× the global median as a spike
-            for (let i = 1; i < vals.length - 1; i++) {
-              if (vals[i] > globalBaseline * 1.8) {
-                isSpike[i] = true
-              }
+        if (isElmTrace && history.length > 2) {
+          isSpike = new Array(history.length).fill(false)
+          for (let i = 1; i < history.length - 1; i++) {
+            if (history[i].elm_active) {
+              isSpike[i] = true
             }
-            // Deduplicate: in each run of adjacent spikes, keep only the tallest
-            for (let i = 1; i < vals.length; i++) {
-              if (isSpike[i] && isSpike[i - 1]) {
-                if (vals[i] >= vals[i - 1]) {
-                  isSpike[i - 1] = false
-                } else {
-                  isSpike[i] = false
-                }
+          }
+          // Deduplicate: in each run of adjacent spikes, keep only the tallest
+          for (let i = 1; i < history.length; i++) {
+            if (isSpike[i] && isSpike[i - 1]) {
+              if (vals[i] >= vals[i - 1]) {
+                isSpike[i - 1] = false
+              } else {
+                isSpike[i] = false
               }
             }
           }
@@ -359,15 +354,23 @@ export default function UnifiedTracePanel({
             ctx.moveTo(x, y)
           } else if (isSpike && isSpike[i]) {
             // ELM spike: draw as vertical line at this x position
-            // Find baseline Y from previous non-spike point
+            // Find baseline from nearest non-ELM point
             let baseVal = vals[i - 1]
-            for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-              if (!isSpike[j]) { baseVal = vals[j]; break }
+            for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+              if (!history[j].elm_active) { baseVal = vals[j]; break }
             }
             const baseY = toY(baseVal)
             ctx.lineTo(x, baseY)  // continue baseline to spike x
             ctx.lineTo(x, y)      // vertical up to peak
             ctx.lineTo(x, baseY)  // vertical back down
+          } else if (isSpike && history[i].elm_active) {
+            // Adjacent ELM point (not the tallest) — render at baseline
+            // to suppress tent pole shoulders from elevated latched Dα
+            let baseVal = vals[i]
+            for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+              if (!history[j].elm_active) { baseVal = vals[j]; break }
+            }
+            ctx.lineTo(x, toY(baseVal))
           } else {
             ctx.lineTo(x, y)
           }

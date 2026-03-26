@@ -240,6 +240,7 @@ export function useSimulation(
         ne_line: snap.ne_line,
         impurity_fraction: snap.impurity_fraction,
         elm_suppressed: snap.elm_suppressed,
+        elm_active: anyElmActive,
       }
       historyRef.current.push(pt)
       if (historyRef.current.length > MAX_TRACE_HISTORY) {
