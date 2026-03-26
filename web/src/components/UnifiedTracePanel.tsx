@@ -325,18 +325,29 @@ export default function UnifiedTracePanel({
         let isSpike: boolean[] | null = null
         if (isElmTrace && vals.length > 2) {
           isSpike = new Array(vals.length).fill(false)
-          // First pass: compute median-like baseline from wider neighborhood
+          // First pass: detect spikes using 25th-percentile baseline from ±4 window
           for (let i = 1; i < vals.length - 1; i++) {
-            // Gather nearby non-spike values in a ±4 window
             const neighbors: number[] = []
             for (let j = Math.max(0, i - 4); j <= Math.min(vals.length - 1, i + 4); j++) {
               if (j !== i) neighbors.push(vals[j])
             }
             neighbors.sort((a, b) => a - b)
-            // Use 25th percentile as baseline (resistant to adjacent spikes)
             const baseline = neighbors[Math.floor(neighbors.length * 0.25)] || 0
             if (baseline > 0 && vals[i] > baseline * 2.0) {
               isSpike[i] = true
+            }
+          }
+          // Second pass: deduplicate adjacent spikes — keep only the tallest
+          // point in each consecutive run, so each ELM renders as a single
+          // vertical line instead of doubled-up tent poles.
+          for (let i = 1; i < vals.length; i++) {
+            if (isSpike[i] && isSpike[i - 1]) {
+              // Two adjacent spikes: keep the taller one, suppress the other
+              if (vals[i] >= vals[i - 1]) {
+                isSpike[i - 1] = false
+              } else {
+                isSpike[i] = false
+              }
             }
           }
         }
