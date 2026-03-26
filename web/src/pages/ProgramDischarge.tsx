@@ -78,8 +78,8 @@ function Sparkline({
     .join(' ')
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
-      <path d={d} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height }}>
+      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }
