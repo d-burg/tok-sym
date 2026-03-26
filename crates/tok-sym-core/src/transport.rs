@@ -432,17 +432,25 @@ impl TransportModel {
         // Stochasticity: each ELM period and amplitude are randomly jittered
         // to produce realistic irregular timing as seen in experiment.
 
-        // Decrement display cooldown — keeps elm_active true for a few timesteps
-        // so the animation frame loop reliably captures the ELM event.
+        // Decrement display cooldown — keeps elm_active AND elm_type nonzero
+        // for a few timesteps so the animation frame loop reliably captures
+        // the ELM event (Dα spike, label, portview flash, divertor heat).
         if self.elm_cooldown > 0.0 {
             self.elm_cooldown -= dt;
-            self.elm_active = self.elm_cooldown > 0.0;
+            if self.elm_cooldown <= 0.0 {
+                // Cooldown expired — clear everything
+                self.elm_active = false;
+                self.elm_type = 0;
+                self.elm_energy_loss = 0.0;
+                self.elm_ped_crash_frac = 0.0;
+            }
+            // else: keep elm_active, elm_type, elm_energy_loss from the triggering step
         } else {
             self.elm_active = false;
+            self.elm_type = 0;
+            self.elm_energy_loss = 0.0;
+            self.elm_ped_crash_frac = 0.0;
         }
-        self.elm_energy_loss = 0.0;
-        self.elm_ped_crash_frac = 0.0;
-        self.elm_type = 0;
 
         // Determine ELM regime based on impurity level, q95, and shaping
         let imp = &device.impurity_elm;
