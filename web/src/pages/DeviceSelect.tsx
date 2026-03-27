@@ -218,7 +218,7 @@ export default function DeviceSelect() {
 
         {/* Attribution */}
         <p className="text-gray-600 text-[11px]">
-          &copy; 2026 Daniel Burgess and the Columbia Fusion Research Center
+          &copy; 2026 Daniel Burgess and the Columbia Fusion Research Center &middot; v{__APP_VERSION__}
         </p>
       </footer>
 

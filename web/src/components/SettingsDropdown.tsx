@@ -146,6 +146,11 @@ export default function SettingsDropdown({ onRestartTutorial }: { onRestartTutor
             </svg>
             Physics Bibliography
           </button>
+
+          {/* Version */}
+          <div className="mt-1.5 pt-1.5 border-t border-gray-800 px-2 text-[10px] text-gray-600">
+            v{__APP_VERSION__}
+          </div>
         </div>
       )}
     </div>

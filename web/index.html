@@ -2,13 +2,60 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>fusionsimulator.io — Interactive Tokamak Plasma Simulator</title>
+
+    <!-- SEO & legitimacy signals -->
+    <meta name="description" content="Real-time interactive tokamak plasma physics simulator. Explore ITER, JET, DIII-D, and CENTAUR with 0D transport modeling, equilibrium reconstruction, and 3D port view visualization. Open-source educational tool for fusion energy research." />
+    <meta name="keywords" content="tokamak, plasma physics, fusion energy, ITER, JET, DIII-D, simulator, magnetic confinement, H-mode, ELM, divertor" />
+    <meta name="author" content="Daniel Burgess, Columbia Fusion Research Center" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://fusionsimulator.io/" />
+
+    <!-- Open Graph (social sharing / link previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="fusionsimulator.io — Interactive Tokamak Plasma Simulator" />
+    <meta property="og:description" content="Real-time interactive tokamak plasma physics simulator. Explore ITER, JET, DIII-D, and CENTAUR with 0D transport, equilibrium reconstruction, and 3D visualization." />
+    <meta property="og:url" content="https://fusionsimulator.io/" />
+    <meta property="og:site_name" content="fusionsimulator.io" />
+    <meta property="og:image" content="https://fusionsimulator.io/android-chrome-512x512.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="fusionsimulator.io — Interactive Tokamak Simulator" />
+    <meta name="twitter:description" content="Real-time interactive tokamak plasma physics simulator with 0D transport, equilibrium reconstruction, and 3D port view." />
+    <meta name="twitter:image" content="https://fusionsimulator.io/android-chrome-512x512.png" />
+
+    <!-- Structured data for search engines -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "fusionsimulator.io",
+      "url": "https://fusionsimulator.io",
+      "description": "Real-time interactive tokamak plasma physics simulator for fusion energy research and education.",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Web",
+      "author": {
+        "@type": "Person",
+        "name": "Daniel Burgess",
+        "affiliation": {
+          "@type": "Organization",
+          "name": "Columbia Fusion Research Center"
+        }
+      },
+      "license": "https://github.com/d-burg/fusion-sim/blob/main/LICENSE"
+    }
+    </script>
+
+    <!-- Favicons -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>fusionsimulator.io</title>
   </head>
   <body>
     <div id="root"></div>

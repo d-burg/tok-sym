@@ -11,4 +11,7 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1500, // WASM bundle is large; suppress warning
   },
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+  },
 })
