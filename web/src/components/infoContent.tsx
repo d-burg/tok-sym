@@ -238,6 +238,16 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
       collapse.
     </>
   ),
+  p_fus: (
+    <>
+      <b>Fusion power (P<sub>fus</sub>)</b> &mdash; the total thermonuclear
+      power from D-T (or D-D) fusion reactions. For D-T:
+      P<sub>fus</sub> = 5 &times; P<sub>&alpha;</sub> since the 3.52 MeV alpha
+      carries 20% of the 17.59 MeV total reaction energy. The ITER design
+      target is P<sub>fus</sub> &asymp; 500 MW at Q = 10. JET achieved a
+      record 11 MW during DTE2 (2021).
+    </>
+  ),
   p_loss: (
     <>
       <b>Loss power (P<sub>loss</sub>)</b> &mdash; the power conducted

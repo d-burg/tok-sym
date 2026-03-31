@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { SimHandle, type PresetId, getPreset } from './wasm'
+import { SimHandle, type PresetId, getPreset, getDevice } from './wasm'
 import type { Snapshot, TracePoint, ProfileFrame, ProcessedProfile } from './types'
 import { processProfileFrames } from './profileUtils'
+import { computeFusion } from './fusionPhysics'
 
 const DT = 0.005 // 5 ms physics timestep
 // Trace history (lightweight: ~200 bytes/entry) — large buffer for full-discharge coverage.
@@ -50,6 +51,7 @@ export function useSimulation(
   const rafRef = useRef<number>(0)
   const massOverrideRef = useRef<number | null>(null)
   const currentDeviceRef = useRef(initialDeviceId)
+  const currentDeviceObjRef = useRef(getDevice(initialDeviceId))
   const currentPresetRef = useRef(initialPreset)
   const wallJsonRef = useRef<string>('[]')
   const programJsonRef = useRef<string>('{}')
@@ -77,6 +79,11 @@ export function useSimulation(
   // Create a new sim handle from a preset
   const createSim = useCallback((deviceId: string, preset: PresetId) => {
     currentDeviceRef.current = deviceId
+    const dev = getDevice(deviceId)
+    if (dev && massOverrideRef.current !== null) {
+      dev.mass_number = massOverrideRef.current
+    }
+    currentDeviceObjRef.current = dev
     currentPresetRef.current = preset
     // Clean up old handle
     if (simRef.current) {
@@ -119,6 +126,8 @@ export function useSimulation(
 
   // Create a new sim handle from custom program JSON
   const createSimFromProgram = useCallback((deviceId: string, programJson: string) => {
+    currentDeviceRef.current = deviceId
+    currentDeviceObjRef.current = getDevice(deviceId)
     // Clean up old handle
     if (simRef.current) {
       simRef.current.free()
@@ -172,13 +181,30 @@ export function useSimulation(
 
     const sim = simRef.current
 
-    // Step physics multiple times per frame for real-time feel
-    // (at 60fps, 3 steps of 5ms = 15ms sim time per frame ≈ 1x speed)
-    // Use fractional accumulator so sub-1x speeds are accurate on average
-    const BASE_STEPS = 3
-    stepAccRef.current += BASE_STEPS * speedRef.current
-    const stepsThisFrame = Math.floor(stepAccRef.current)
-    stepAccRef.current -= stepsThisFrame
+    // Step physics at a fixed rate of 3 steps × 5ms = 15ms sim time per tick.
+    // Speed multiplier controls how many ticks run per animation frame:
+    //   ≥1x: run multiple batches of 3 steps per frame (more computation)
+    //   <1x: skip frames (fewer ticks per second, same computation per tick)
+    // This ensures the physics timestep grouping is always identical
+    // regardless of playback speed — same dt, same steps-per-batch.
+    const STEPS_PER_TICK = 3
+    const speed = speedRef.current
+
+    // Sub-1x: skip frames to slow down. Accumulate fractional ticks.
+    if (speed < 1.0) {
+      stepAccRef.current += speed
+      if (stepAccRef.current < 1.0) {
+        // Skip this frame — schedule next and return without stepping
+        if (runningRef.current) {
+          rafRef.current = requestAnimationFrame(tick)
+        }
+        return
+      }
+      stepAccRef.current -= 1.0
+    }
+
+    // Number of tick batches this frame: 1 at ≤1x, proportional at >1x
+    const tickBatches = speed >= 1.0 ? Math.round(speed) : 1
     let snap: Snapshot | null = null
     // Track peak Dα and any ELM across all sub-steps so that ELMs
     // are reliably captured even when many physics steps are skipped.
@@ -191,7 +217,8 @@ export function useSimulation(
     let elmEnergyLoss = 0
     let elmType = 0
 
-    for (let i = 0; i < stepsThisFrame; i++) {
+    const totalSteps = tickBatches * STEPS_PER_TICK
+    for (let i = 0; i < totalSteps; i++) {
       const json = sim.step(DT)
       snap = JSON.parse(json)
       if (snap) {
@@ -239,6 +266,8 @@ export function useSimulation(
         te_ped: snap.te_ped,
         ne_line: snap.ne_line,
         impurity_fraction: snap.impurity_fraction,
+        p_fus: currentDeviceObjRef.current
+          ? computeFusion(snap!, currentDeviceObjRef.current).p_fus : 0,
         elm_suppressed: snap.elm_suppressed,
         elm_active: anyElmActive,
       }

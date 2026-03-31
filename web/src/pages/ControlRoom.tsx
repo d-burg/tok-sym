@@ -231,7 +231,7 @@ export default function ControlRoom() {
 
           {/* Speed selector */}
           <div className="flex rounded overflow-hidden border border-gray-700">
-            {[4, 2, 1.0, 0.75, 0.5].map((s) => (
+            {[2, 1.0, 0.75, 0.5].map((s) => (
               <button
                 key={s}
                 onClick={() => handleSpeedChange(s)}

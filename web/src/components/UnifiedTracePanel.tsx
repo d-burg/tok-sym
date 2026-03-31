@@ -36,13 +36,14 @@ const ALL_TRACES: TraceConfig[] = [
   { key: 'w_th',             label: 'Wₜₕ',       unit: 'MJ',       color: '#4ade80' },
   { key: 'p_input',          label: 'Pᵢₙ',       unit: 'MW',       color: '#facc15' },
   { key: 'p_rad',            label: 'Pᵣₐd',      unit: 'MW',       color: '#e879f9' },
+  { key: 'p_fus',            label: 'Pfus',       unit: 'MW',       color: '#ff6b6b' },
   { key: 'p_loss',           label: 'Pₗₒₛₛ',     unit: 'MW',       color: '#c084fc' },
   { key: 'v_loop',           label: 'Vₗₒₒₚ',     unit: 'V',        color: '#2dd4bf' },
   { key: 'impurity_fraction',    label: 'fᵢₘₚ',     unit: '%',        color: '#86efac' },
   { key: 'disruption_risk',  label: 'Dᵣᵢₛₖ',     unit: '',         color: '#ef4444' },
 ]
 
-const DEFAULT_KEYS = new Set(['ip', 'beta_n', 'li', 'd_alpha'])
+const DEFAULT_KEYS = new Set(['ip', 'beta_n', 'p_fus', 'd_alpha'])
 
 const MARGIN_LEFT = 56
 const MARGIN_RIGHT = 64

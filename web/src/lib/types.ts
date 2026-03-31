@@ -117,6 +117,7 @@ export interface TracePoint {
   te_ped: number
   ne_line: number
   impurity_fraction: number
+  p_fus: number
   elm_suppressed: boolean
   elm_active?: boolean
 }
