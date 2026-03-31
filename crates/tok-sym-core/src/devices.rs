@@ -61,6 +61,12 @@ pub struct Device {
     /// known overestimation of Martin scaling for very large surface areas.
     /// 1.0 = unmodified Martin scaling, <1.0 = easier H-mode access.
     pub p_lh_factor: f64,
+    /// Device-specific energy confinement correction factor.
+    /// Multiplies tau_E after all physics-based corrections (IPB98, H-factor,
+    /// triangularity, DT boost). Accounts for device-specific effects not
+    /// captured by generic scalings: wall conditioning, NBI deposition
+    /// geometry, divertor closure, etc. 1.0 = unmodified.
+    pub confinement_factor: f64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -241,6 +247,7 @@ pub fn diiid() -> Device {
             delta_grassy_min: 0.4,
         },
         p_lh_factor: 1.0, // well-characterized; Martin scaling fits DIII-D data directly
+        confinement_factor: 1.0,
     }
 }
 
@@ -275,6 +282,7 @@ pub fn iter() -> Device {
         // shouldn't reduce P_loss for L-H comparison in experiments).
         // Target P_LH ≈ 30–35 MW so net_heating (≈40 MW) crosses threshold.
         p_lh_factor: 0.35,
+        confinement_factor: 1.0,
     }
 }
 
@@ -305,6 +313,11 @@ pub fn jet() -> Device {
             delta_grassy_min: 0.35,
         },
         p_lh_factor: 0.9, // slight correction for JET ILW vs carbon wall
+        // JET DTE2 achieved better confinement than generic IPB98 at matched
+        // parameters, attributed to optimized NBI deposition, high shaping,
+        // and ILW wall conditioning. 1.25× brings P_fus into the 5-15 MW
+        // range consistent with DTE2/DTE3 results.
+        confinement_factor: 1.35,
     }
 }
 
@@ -393,6 +406,7 @@ pub fn centaur() -> Device {
         // regime, achieving near-H-mode confinement (H98y2 ≈ 0.96) without
         // the ELM penalty. High factor keeps the plasma in L-mode.
         p_lh_factor: 3.0,
+        confinement_factor: 1.0,
     }
 }
 

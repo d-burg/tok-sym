@@ -283,6 +283,49 @@ impl Profiles {
         sum / vol
     }
 
+    /// Normalize profile amplitudes so integrated stored energy matches 0D W_th.
+    ///
+    /// The 0D transport model determines W_th from power balance, but the
+    /// tanh-pedestal profiles may integrate to a different stored energy.
+    ///
+    /// Only the core Te is adjusted — the pedestal height is set by MHD
+    /// stability (peeling-ballooning) and should not be squeezed by global
+    /// energy constraints. The edge value is also left unchanged.
+    ///
+    /// `w_th_mj` is the 0D stored energy in MJ, `volume` is the plasma
+    /// volume in m³.
+    pub fn normalize_to_energy(&mut self, w_th_mj: f64, volume: f64) {
+        if w_th_mj < 0.001 || volume < 0.1 {
+            return;
+        }
+
+        // Compute W from current profiles: W = 3 * ne * Te * V * 1.602e-2 (MJ)
+        let n = 50;
+        let mut w_prof = 0.0;
+        let mut vol_sum = 0.0;
+        for i in 0..n {
+            let rho = (i as f64 + 0.5) / n as f64;
+            let dv = 2.0 * rho;
+            w_prof += 3.0 * self.ne(rho) * self.te(rho) * dv;
+            vol_sum += dv;
+        }
+        w_prof = w_prof / vol_sum * volume * 1.602e-2; // MJ
+
+        if w_prof < 0.001 {
+            return;
+        }
+
+        let ratio = w_th_mj / w_prof;
+        // Only apply moderate corrections (0.6x to 1.8x).
+        let scale = ratio.clamp(0.6, 1.8);
+
+        // Scale only the core Te — the pedestal and edge are MHD-limited
+        // and should be preserved. This adjusts the temperature peaking
+        // to match the 0D energy content without distorting the pedestal.
+        self.te_params.core *= scale;
+        // Don't touch te_params.ped or te_params.edge
+    }
+
     /// Compute internal inductance l_i from Te profile shape.
     ///
     /// Uses Spitzer conductivity: j(ρ) ∝ Te(ρ)^{3/2}, then integrates to get
@@ -343,7 +386,7 @@ impl Profiles {
     ///
     /// `elm_ped_crash` is a fractional crash applied directly to the pedestal
     /// when an ELM fires (0.0 = no ELM, >0 = pedestal drops by this fraction).
-    pub fn update_from_0d(&mut self, te0: f64, ne0: f64, h_mode: bool, dt: f64, elm_ped_crash: f64) {
+    pub fn update_from_0d(&mut self, te0: f64, ne0: f64, h_mode: bool, dt: f64, elm_ped_crash: f64, delta: f64) {
         let l_to_h = h_mode && !self.prev_h_mode;
         self.h_mode = h_mode;
         self.prev_h_mode = h_mode;
@@ -377,17 +420,29 @@ impl Profiles {
             // Scale core to smoothed values (not raw te0/ne0)
             self.te_params.core = self.te0_core_smooth.max(0.1);
 
-            // Pedestal tracks core with realistic ratio, smoothed
-            let target_te_ped = (0.35 * te0).max(0.3).min(te0 * 0.6);
-            let tau_ped = 0.2; // 200ms pedestal response time
+            // Pedestal tracks core with realistic ratio, smoothed.
+            // Triangularity dependence: higher δ stabilizes peeling-ballooning
+            // modes, allowing higher pedestal pressure before ELM crash.
+            // Experimentally: Te_ped scales roughly as (1 + α·δ) where α ≈ 0.5-1.
+            // At δ=0.0: ped_ratio ≈ 0.30; at δ=0.5: ped_ratio ≈ 0.37;
+            // at δ=0.7: ped_ratio ≈ 0.40. Clamped to [0.25, 0.50].
+            // For negative δ (NT), pedestal is suppressed since there's no
+            // edge transport barrier.
+            let delta_eff = delta.max(0.0); // only positive δ boosts pedestal
+            let ped_ratio = (0.30 + 0.20 * delta_eff).clamp(0.25, 0.50);
+            let target_te_ped = (ped_ratio * te0).max(0.3).min(te0 * 0.6);
+            let tau_ped = 0.10; // 100ms pedestal response time
             let alpha = (dt / tau_ped).min(1.0);
             self.te_params.ped += (target_te_ped - self.te_params.ped) * alpha;
             self.te_ped = self.te_params.ped;
 
-            // Density: scale to match ne_bar from transport
-            let ne0_target = self.ne0_core_smooth * 1.3; // peaking factor, using smoothed value
+            // Density: ne0 from transport is already ne_bar * 1.3 (peaked).
+            // Use smoothed ne0 directly as the core value, and scale pedestal
+            // relative to ne0 (not ne0*1.3 again, which caused ne_ped > ne_bar).
+            // Typical H-mode: ne_ped/ne_bar ~ 0.7-0.85, so ne_ped ~ 0.55 * ne0.
+            let ne0_target = self.ne0_core_smooth;
             self.ne_params.core = ne0_target.max(0.05);
-            let target_ne_ped = (0.7 * ne0_target).max(0.1);
+            let target_ne_ped = (0.55 * ne0_target).max(0.1);
             self.ne_params.ped += (target_ne_ped - self.ne_params.ped) * alpha;
             self.ne_ped = self.ne_params.ped;
 
@@ -399,17 +454,45 @@ impl Profiles {
                 self.ne_ped = self.ne_params.ped;
             }
         } else {
-            // Smooth pedestal ramp-down after H→L transition
-            if self.te_params.ped > self.te_params.edge * 1.5 {
-                let tau_down = 0.1; // 100ms — back-transition is faster
-                let alpha = (dt / tau_down).min(1.0);
-                self.te_params.ped += (self.te_params.edge - self.te_params.ped) * alpha;
-                self.ne_params.ped += (self.ne_params.edge - self.ne_params.ped) * alpha;
+            // Not in H-mode — either standard L-mode or NT-edge regime.
+            let is_nt = delta < -0.2;
+
+            if is_nt && te0 > 0.5 {
+                // NT-edge regime: ideal-ballooning-limited edge produces a small
+                // but nonzero pedestal structure. Much smaller than H-mode
+                // (no edge transport barrier), but finite temperature gradient
+                // is maintained by the ballooning stability boundary.
+                // Typically Te_ped_NT ~ 10-20% of Te0.
+                let target_te_ped = (0.12 * te0).max(0.2);
+                let target_ne_ped = (0.40 * ne0).max(0.05);
+                let tau_ped = 0.15;
+                let alpha = (dt / tau_ped).min(1.0);
+
+                self.te_params.ped += (target_te_ped - self.te_params.ped) * alpha;
+                self.ne_params.ped += (target_ne_ped - self.ne_params.ped) * alpha;
+                self.te_params.core = self.te0_core_smooth.max(0.1);
+                self.ne_params.core = self.ne0_core_smooth.max(0.05);
                 self.te_ped = self.te_params.ped;
                 self.ne_ped = self.ne_params.ped;
+
+                // Blend toward H-mode-like profile shape (partial pedestal)
+                let nt_blend_target = 0.5; // halfway between L-mode and full H-mode shape
+                let alpha_blend = (dt / 0.3).min(1.0);
+                self.blend += (nt_blend_target - self.blend) * alpha_blend;
+                self.blend = self.blend.clamp(0.0, 1.0);
             } else {
-                self.te_ped = 0.0;
-                self.ne_ped = 0.0;
+                // Standard L-mode: smooth pedestal ramp-down
+                if self.te_params.ped > self.te_params.edge * 1.5 {
+                    let tau_down = 0.1;
+                    let alpha = (dt / tau_down).min(1.0);
+                    self.te_params.ped += (self.te_params.edge - self.te_params.ped) * alpha;
+                    self.ne_params.ped += (self.ne_params.edge - self.ne_params.ped) * alpha;
+                    self.te_ped = self.te_params.ped;
+                    self.ne_ped = self.ne_params.ped;
+                } else {
+                    self.te_ped = 0.0;
+                    self.ne_ped = 0.0;
+                }
             }
         }
     }
@@ -488,11 +571,11 @@ mod tests {
         let mut p = Profiles::default();
 
         // Transition to H-mode first (pedestal starts at edge)
-        p.update_from_0d(5.0, 0.8, true, 0.005, 0.0);
+        p.update_from_0d(5.0, 0.8, true, 0.005, 0.0, 0.5);
         let te_ped_1 = p.te_ped;
 
         // Large change in core Te — pedestal should be smoothed
-        p.update_from_0d(8.0, 0.8, true, 0.005, 0.0);
+        p.update_from_0d(8.0, 0.8, true, 0.005, 0.0, 0.5);
         let te_ped_2 = p.te_ped;
 
         // Pedestal should not jump instantly (smoothed by tau_ped = 0.2s)
@@ -509,12 +592,12 @@ mod tests {
         let mut p = Profiles::default();
         // Run several L-mode steps to fully ramp down the default pedestal
         for _ in 0..200 {
-            p.update_from_0d(3.0, 0.6, false, 0.005, 0.0);
+            p.update_from_0d(3.0, 0.6, false, 0.005, 0.0, 0.5);
         }
         assert_eq!(p.te_ped, 0.0);
 
         // Transition to H-mode — pedestal should start near edge, NOT at default 0.83
-        p.update_from_0d(3.0, 0.6, true, 0.005, 0.0);
+        p.update_from_0d(3.0, 0.6, true, 0.005, 0.0, 0.5);
         assert!(
             p.te_ped < 0.2,
             "On L→H transition, te_ped={} should start near edge (~0.07), not jump to H-mode default",
@@ -528,7 +611,7 @@ mod tests {
 
         // After many H-mode steps, pedestal should build up toward target
         for _ in 0..200 {
-            p.update_from_0d(3.0, 0.6, true, 0.005, 0.0);
+            p.update_from_0d(3.0, 0.6, true, 0.005, 0.0, 0.5);
         }
         assert!(
             p.te_ped > 0.5,
@@ -542,13 +625,13 @@ mod tests {
         let mut p = Profiles::default();
         // Establish H-mode with built-up pedestal
         for _ in 0..200 {
-            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0);
+            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0, 0.5);
         }
         let te_ped_before = p.te_ped;
         assert!(te_ped_before > 0.5, "Pedestal should be well-established");
 
         // Transition to L-mode — pedestal should NOT zero instantly
-        p.update_from_0d(2.0, 0.5, false, 0.005, 0.0);
+        p.update_from_0d(2.0, 0.5, false, 0.005, 0.0, 0.5);
         assert!(
             p.te_ped > te_ped_before * 0.5,
             "On H→L transition, te_ped={} should not drop instantly from {}",
@@ -558,7 +641,7 @@ mod tests {
 
         // After many L-mode steps, pedestal should decay toward zero
         for _ in 0..100 {
-            p.update_from_0d(2.0, 0.5, false, 0.005, 0.0);
+            p.update_from_0d(2.0, 0.5, false, 0.005, 0.0, 0.5);
         }
         assert!(
             p.te_ped == 0.0 || p.te_ped < 0.15,
@@ -572,7 +655,7 @@ mod tests {
         let mut p = Profiles::default();
         // Build up H-mode with established pedestal
         for _ in 0..400 {
-            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0);
+            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0, 0.5);
         }
         let te_core_before = p.te_params.core;
         let te_ped_before = p.te_params.ped;
@@ -580,7 +663,7 @@ mod tests {
         assert!(te_ped_before > 0.5, "Pedestal should be well-established: {te_ped_before}");
 
         // Apply ELM crash (15% pedestal crash fraction)
-        p.update_from_0d(3.6, 0.7, true, 0.001, 0.15);
+        p.update_from_0d(3.6, 0.7, true, 0.001, 0.15, 0.5);
         let te_core_after = p.te_params.core;
         let te_ped_after = p.te_params.ped;
         let ne_ped_after = p.ne_params.ped;

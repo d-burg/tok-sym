@@ -247,7 +247,7 @@ impl TransportModel {
         // Only significant for DT fuel (mass > 2.0) at fusion-relevant temperatures.
         let is_dt = device.mass_number > 2.0;
         self.p_alpha = if is_dt && self.te0 > 1.0 {
-            let ti_eff = self.te0 * 0.65; // effective volume-averaged Ti ≈ 0.65 × Te0
+            let ti_eff = self.te0 * 0.70; // effective volume-averaged Ti ≈ 0.70 × Te0
             let ne_vol_m3 = self.ne_bar * 0.85 * 1e20; // volume-averaged ne (m⁻³)
             let f_fuel = (1.0 - self.impurity_fraction).max(0.5);
             let n_d = ne_vol_m3 * f_fuel / 2.0; // 50-50 D-T mix
@@ -272,7 +272,7 @@ impl TransportModel {
                 * 1e-6; // cm³/s → m³/s
 
             let e_alpha_j = 3.52 * 1.602e-13; // alpha energy: 3.52 MeV → Joules
-            let f_profile = 0.45; // profile peaking correction (n²T² integration)
+            let f_profile = 0.48; // profile peaking correction (<n²σv> / n_bar²·σv_bar)
 
             let p_alpha_w = n_d * n_t * sigmav * e_alpha_j * volume * f_profile; // Watts
             (p_alpha_w * 1e-6).max(0.0).min(500.0) // convert to MW, cap for numerical safety
@@ -289,8 +289,21 @@ impl TransportModel {
         // is a volume integral, not a line integral.
         let ne_m3 = self.ne_bar * 0.85 * 1e20; // volume-averaged ne in m⁻³
         let p_brem = 5.35e-37 * ne_m3 * ne_m3 * z_eff * te_avg.sqrt() * volume * 1e-6; // MW
-        // Line radiation (simplified: proportional to ne² at low Te)
-        let p_line = p_brem * 0.3 * (z_eff - 1.0).max(0.0);
+        // Intrinsic impurity radiation from wall material (carbon, tungsten).
+        // In real tokamaks, edge/SOL impurities produce significant line
+        // radiation even without intentional seeding, typically 15-30% of
+        // total heating power. Rather than an ne²V-based model (which scales
+        // poorly across machine sizes), we use a fraction of total loss power
+        // calibrated to Zeff and edge temperature.
+        // At Zeff=1.5: ~15% radiative fraction; at Zeff=2.0: ~25%.
+        // Scale intrinsic radiation with external heating power (not alpha),
+        // since wall impurity sources depend on plasma-wall interaction, not
+        // fusion power. Gives ~10-20% of P_external as intrinsic radiation.
+        let p_external = self.p_ohmic + prog.p_nbi + prog.p_ech + prog.p_ich;
+        let rad_fraction_intrinsic = 0.10 * (z_eff - 1.0).max(0.2) + 0.05;
+        let p_intrinsic = rad_fraction_intrinsic * p_external.max(0.01);
+        // Line radiation (residual, on top of intrinsic)
+        let p_line = p_brem * 0.15 * (z_eff - 1.0).max(0.0);
         // Impurity radiation — effective 0D Lz coefficient.
         // Physical Lz(Ne) peaks at ~5e-31 W·m³ near 0.5 keV, but in real tokamaks
         // neon concentrates in the edge/SOL, not the core volume. For our volume-
@@ -308,7 +321,7 @@ impl TransportModel {
             1.0
         };
         let p_impurity = self.impurity_fraction * ne_m3 * ne_m3 * lz_impurity * collapse_factor * volume * 1e-6; // MW
-        self.p_rad = p_brem + p_line + p_impurity;
+        self.p_rad = p_brem + p_intrinsic + p_line + p_impurity;
         self.p_rad = self.p_rad.max(0.0);
 
         // ── L-H transition threshold ──
@@ -328,14 +341,14 @@ impl TransportModel {
         if is_nt {
             // Negative triangularity "NT-edge" mode: confinement between L-mode
             // and H-mode, fully ELM-free. Destabilized ballooning modes increase
-            // edge transport and radiation, giving ~70% of H-mode confinement
-            // without an edge transport barrier.
+            // edge transport, giving ~60-70% of H-mode confinement without an
+            // edge transport barrier.
             // in_hmode stays FALSE — prevents ELMs and DT H-mode boost.
             self.in_hmode = false;
             let min_ne = 0.15 * ne_gw.max(0.3);
             if ip >= 0.2 * device.ip_max && self.ne_bar > min_ne && net_heating > 0.5 {
-                // NT-edge: h_factor between L-mode (0.5) and H-mode (1.0)
-                self.h_factor = 0.82;
+                // NT-edge: ~65% of H-mode confinement (DIII-D NT experiments)
+                self.h_factor = 0.65;
             } else {
                 self.h_factor = 0.5;
             }
@@ -371,26 +384,33 @@ impl TransportModel {
             * kappa.powf(0.78)
             * mass.powf(0.19);
 
-        // DT isotope confinement enhancement beyond IPB98 M^0.19 scaling.
-        // Real DT experiments (JET DTE2, TFTR) showed ~40% better confinement
-        // than DD at matched parameters, attributed to alpha heating profile
-        // peaking and reduced ion-electron coupling.  The IPB98 M^0.19 only
-        // captures ~4% of this.  Apply an additional 1.35× for DT H-mode.
-        // (Cordey et al., Nucl. Fusion 39 (1999) 301; Maggi et al., PPCF 60 (2018))
-        if device.mass_number > 2.0 && self.in_hmode {
-            self.tau_e *= 1.35;
+        // Triangularity correction to confinement (not in IPB98).
+        // Higher δ stabilizes edge MHD, broadens pressure profile, and
+        // improves energy confinement. Experimental scaling from DIII-D,
+        // JET, ASDEX-U suggests ~10-15% improvement from δ=0.2 to δ=0.6
+        // in H-mode. For positive δ only; NT plasmas handle this separately.
+        if self.in_hmode {
+            let delta_ref = 0.40; // reference triangularity (typical H-mode)
+            let delta_correction = 1.0 + 0.20 * (delta - delta_ref);
+            self.tau_e *= delta_correction.clamp(0.92, 1.10);
         }
 
-        // NT-edge confinement enhancements:
-        // 1. Reduced edge turbulence from destabilized ballooning modes
-        // 2. DT isotope effect (smaller than H-mode DT boost since no pedestal)
-        if is_nt && self.h_factor > 0.6 {
-            let nt_boost = 1.0 + (delta_avg.abs() / 0.55).min(1.0) * 0.10;
-            self.tau_e *= nt_boost;
-            // DT isotope effect in NT-edge (reduced from H-mode 1.35×)
-            if device.mass_number > 2.0 {
-                self.tau_e *= 1.12;
-            }
+        // DT isotope confinement enhancement beyond IPB98 M^0.19 scaling.
+        // IPB98 already includes M^0.19 which gives ~1.19× for DT (M=2.5)
+        // vs DD (M=2.0).  JET DTE2/TFTR showed ~40% total improvement,
+        // but much of this is now captured by the calibrated alpha self-
+        // heating (fix 3).  A modest 1.10× residual accounts for effects
+        // beyond alpha heating (e.g., isotope mass effect on turbulence).
+        // Total DT advantage: 1.19 (M^0.19) × 1.10 = 1.31× on tau_E,
+        // plus strong alpha self-heating feedback on Te and W_th.
+        if device.mass_number > 2.0 && self.in_hmode {
+            self.tau_e *= 1.10;
+        }
+
+        // NT-edge DT isotope effect: modest, no pedestal to boost.
+        // Only the mass dependence beyond IPB98 M^0.19.
+        if is_nt && self.h_factor > 0.55 && device.mass_number > 2.0 {
+            self.tau_e *= 1.05;
         }
 
         // Track peak Ip for rampdown detection
@@ -411,6 +431,11 @@ impl TransportModel {
 
         // Confinement mode multiplier
         self.tau_e *= h_eff;
+
+        // Device-specific confinement correction (wall conditioning, NBI
+        // geometry, divertor closure, etc.)
+        self.tau_e *= device.confinement_factor;
+
         self.tau_e = self.tau_e.max(0.001);
 
         // ── Power balance: dW/dt = P_input - W/τ_E - P_rad ──
@@ -525,7 +550,7 @@ impl TransportModel {
                     let elm_fraction = (0.05 + 0.08 * power_excess.min(1.0))
                         * (0.97 + 0.06 * rng_amp); // ±3% amplitude variation — uniform ELM crashes
                     self.elm_energy_loss = elm_fraction * self.w_th;
-                    self.elm_ped_crash_frac = elm_fraction * 2.5; // amplified for pedestal
+                    self.elm_ped_crash_frac = elm_fraction * 1.5; // pedestal crash > global
                     self.w_th *= 1.0 - elm_fraction;
                     // ELM particle loss: ΔN/N is ~15% of ΔW/W for Type I.
                     // Real ELM particle losses are small vs total inventory;
@@ -538,7 +563,7 @@ impl TransportModel {
                     let elm_fraction = (0.005 + 0.01 * power_excess.min(1.0))
                         * (0.6 + 0.8 * rng_amp); // wider amplitude variation
                     self.elm_energy_loss = elm_fraction * self.w_th;
-                    self.elm_ped_crash_frac = elm_fraction * 2.0; // amplified for pedestal
+                    self.elm_ped_crash_frac = elm_fraction * 1.2; // pedestal crash > global
                     self.w_th *= 1.0 - elm_fraction;
                     // ELM particle loss (smaller for Type II)
                     self.ne_bar *= 1.0 - elm_fraction * 0.10;
@@ -562,8 +587,12 @@ impl TransportModel {
         } else {
             0.01
         };
-        // Central Te with peaking factor ~2
-        self.te0 = (te_avg_from_w * 2.0).max(0.01);
+        // Central Te with peaking factor ~2.5.
+        // Typical H-mode tanh profiles have Te(0)/Te_vol_avg ≈ 2.0-3.0
+        // depending on pedestal height and core peaking. 2.5 is a
+        // reasonable middle ground that gives correct P_fus and Q for
+        // burning plasma scenarios (ITER, JET DTE2).
+        self.te0 = (te_avg_from_w * 2.5).max(0.01);
 
         // ── Beta values ──
         // <p> = 2 * ne [10²⁰ m⁻³] * Te [keV] * 1.602e4  (Pa)
