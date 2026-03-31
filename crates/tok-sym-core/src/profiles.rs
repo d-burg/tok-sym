@@ -578,8 +578,8 @@ mod tests {
         p.update_from_0d(8.0, 0.8, true, 0.005, 0.0, 0.5);
         let te_ped_2 = p.te_ped;
 
-        // Pedestal should not jump instantly (smoothed by tau_ped = 0.2s)
-        // With dt=5ms, alpha = 0.025, so change should be ~2.5% of target delta
+        // Pedestal should not jump instantly (smoothed by tau_ped = 0.1s)
+        // With dt=5ms, alpha = 0.05, so change should be ~5% of target delta
         let target = (0.35 * 8.0_f64).max(0.3).min(8.0 * 0.6);
         assert!(
             (te_ped_2 - te_ped_1).abs() < (target - te_ped_1).abs() * 0.5,

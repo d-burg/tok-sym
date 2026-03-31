@@ -17,7 +17,7 @@
 //!   confinement scaling, L-H transition, and ELM dynamics
 //! - **[`profiles`]** — OMFIT tanh-pedestal parameterization for radial
 //!   electron temperature and density profiles
-//! - **[`devices`]** — Tokamak device definitions (DIII-D, JET, ITER) with
+//! - **[`devices`]** — Tokamak device definitions (DIII-D, JET, ITER, CENTAUR) with
 //!   engineering parameters and wall geometry
 //! - **[`disruption`]** — Disruption risk assessment and multi-phase
 //!   disruption dynamics (precursor → thermal quench → current quench)
@@ -52,7 +52,7 @@
 //! }
 //! ```
 
-/// Tokamak device definitions (DIII-D, JET, ITER).
+/// Tokamak device definitions (DIII-D, JET, ITER, CENTAUR).
 pub mod devices;
 
 /// Cerfon-Freidberg analytic Grad-Shafranov equilibrium solver.

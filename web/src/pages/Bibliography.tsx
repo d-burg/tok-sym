@@ -285,16 +285,29 @@ export default function Bibliography() {
             with increasing heating — a fundamental feature of turbulent plasma transport.
           </p>
           <p>
-            <strong>D-T isotope enhancement:</strong> D-T plasmas receive a 1.35× confinement
-            enhancement beyond the IPB98 M<sup>0.19</sup> scaling, representing the improved core
-            confinement observed in JET DTE2 and TFTR D-T campaigns. This is attributed to alpha
-            heating profile peaking and reduced turbulent transport.<RefTag id="cordey1999" />
+            <strong>Triangularity correction:</strong> Higher positive triangularity (δ) stabilizes
+            edge MHD modes and broadens the pressure profile, improving confinement. A correction
+            of τ<sub>E</sub> × (1 + 0.20 · (δ − 0.40)), clamped to [0.92, 1.10], is applied in
+            H-mode. At ITER's δ = 0.55, this gives ~3% improvement.
           </p>
           <p>
-            <strong>Negative triangularity:</strong> For NT configurations (CENTAUR), a 1.05×
-            confinement boost is applied, with an intermediate H-factor between L-mode and H-mode
-            (~0.82), representing the ELM-free enhanced confinement regime observed
-            experimentally.<RefTag id="marinoni2021" />
+            <strong>D-T isotope enhancement:</strong> D-T plasmas receive a 1.10× confinement
+            enhancement beyond the IPB98 M<sup>0.19</sup> scaling, representing residual isotope
+            effects on turbulent transport. Combined with the M<sup>0.19</sup> factor (1.19× for
+            DT vs DD), the total confinement advantage is ~1.31×. The dominant DT performance
+            gain comes from alpha self-heating in the power balance.<RefTag id="cordey1999" />
+          </p>
+          <p>
+            <strong>Device-specific correction:</strong> A per-device confinement factor accounts
+            for effects not captured by generic scalings (wall conditioning, NBI geometry, divertor
+            closure). JET receives a 1.35× factor to match DTE2/DTE3 optimized scenarios; other
+            devices use 1.0.
+          </p>
+          <p>
+            <strong>Negative triangularity:</strong> For NT configurations (CENTAUR), an
+            H-factor of ~0.65 (between L-mode and H-mode) is used, with a 1.05× DT isotope
+            boost. NT plasmas operate ELM-free with a small ballooning-limited
+            pedestal.<RefTag id="marinoni2021" />
           </p>
         </Section>
 
@@ -386,23 +399,31 @@ export default function Bibliography() {
         {/* ─── 8. Radiation ─── */}
         <Section number={8} title="Radiation Losses">
           <p>
-            Three radiation channels are modeled:<RefTag id="wesson2011" />
+            Four radiation channels are modeled:<RefTag id="wesson2011" />
           </p>
           <p><strong>Bremsstrahlung</strong> (electron-ion free-free radiation):</p>
           <Eq>
             {'P_brem = 5.35 × 10⁻³⁷ · n_e² · Z_eff · T_e^(1/2) · V  [MW]'}
           </Eq>
-          <p><strong>Line radiation</strong> (simplified impurity model):</p>
+          <p><strong>Intrinsic impurity radiation</strong> (wall material — carbon, tungsten, beryllium):</p>
           <Eq>
-            {'P_line = P_brem × 0.3 × max(Z_eff − 1, 0)'}
-          </Eq>
-          <p><strong>Impurity radiation</strong> (effective radiative loss coefficient):</p>
-          <Eq>
-            {'L_z = 3 × 10⁻³¹ · Z_eff^(3/2)  [W·m³]'}<br />
-            {'P_imp = n_e² · L_z · V  [MW]'}
+            {'P_intrinsic = (0.10 · max(Z_eff − 1, 0.2) + 0.05) · P_external'}
           </Eq>
           <p>
-            Total radiated power: P<sub>rad</sub> = P<sub>brem</sub> + P<sub>line</sub> + P<sub>imp</sub>.
+            Scaled with external heating power rather than n<sub>e</sub>²V to avoid unphysical
+            machine-size dependence. Produces ~10–15% radiative fraction for typical H-mode.
+          </p>
+          <p><strong>Line radiation</strong> (residual, on top of intrinsic):</p>
+          <Eq>
+            {'P_line = P_brem × 0.15 × max(Z_eff − 1, 0)'}
+          </Eq>
+          <p><strong>Neon seeding radiation</strong> (intentional impurity injection):</p>
+          <Eq>
+            {'P_neon = f_imp · n_e² · L_z,eff · V  [MW]'}
+          </Eq>
+          <p>
+            Total radiated power: P<sub>rad</sub> = P<sub>brem</sub> + P<sub>intrinsic</sub> +
+            P<sub>line</sub> + P<sub>neon</sub>.
             Radiation fractions above ~80% of total input power pose a risk of radiative collapse and disruption.
           </p>
         </Section>
@@ -452,17 +473,26 @@ export default function Bibliography() {
 
         {/* ─── 11. Fusion Power ─── */}
         <Section number={11} title="Fusion Power and Q">
-          <p>Fusion power is computed by volume integration over the plasma:</p>
+          <p>Fusion power is computed by volume integration over the 51-point radial profiles:</p>
           <Eq>
-            {'P_fus = ∫ (n_e² / 4) · ⟨σv⟩(T(ρ)) · E_fus · dV'}
+            {'P_fus = ∫ (n_D · n_T) · ⟨σv⟩(T_e(ρ)) · E_fus · dV'}
           </Eq>
           <p>
-            using cylindrical shells with dV = 2πR₀ · 2πa²κ · ρ dρ and temperature/density
-            radial profiles (see Sections 15-16). The fusion gain factor is:
+            using cylindrical shells with dV ∝ ρ dρ and the tanh-pedestal Te/ne profiles.
+            For D-T: n<sub>D</sub> = n<sub>T</sub> = n<sub>e</sub> · f<sub>fuel</sub> / 2 (50-50 mix).
+            This profile-integrated P<sub>fus</sub> is used for the status panel display
+            and the P<sub>fus</sub> trace.
           </p>
-          <Eq>{'Q_plasma = P_fusion / P_heating'}</Eq>
           <p>
-            where P<sub>heating</sub> = P<sub>ohmic</sub> + P<sub>aux</sub>. A burning plasma
+            The 0D alpha self-heating (for the transport power balance feedback loop) uses a
+            simplified estimate: T<sub>i,eff</sub> = 0.70 · T<sub>e0</sub> with a profile
+            correction factor f<sub>profile</sub> = 0.48, calibrated against the full profile
+            integration.
+          </p>
+          <Eq>{'Q_plasma = P_fusion / P_external'}</Eq>
+          <p>
+            where P<sub>external</sub> = P<sub>input</sub> − P<sub>α</sub> (externally supplied
+            heating excluding alpha self-heating). A burning plasma
             regime is Q &gt; 5, and ignition corresponds to Q → ∞ (self-sustaining).
           </p>
         </Section>
@@ -561,6 +591,16 @@ export default function Bibliography() {
             where <em>h_ped</em> is the pedestal height, <em>ρ_ped</em> is the pedestal location,
             <em> w</em> is the pedestal width, and the second term represents core peaking.
             This is the same form used in the OMFIT and EFIT profile fitting frameworks.
+          </p>
+          <p>
+            The pedestal height scales with triangularity: T<sub>e,ped</sub> = (0.30 + 0.20·δ) · T<sub>e0</sub>
+            (clamped to 0.25–0.50), reflecting peeling-ballooning stability improvement at higher δ.
+            For NT plasmas, a small ballooning-limited pedestal is maintained: T<sub>e,ped</sub> ≈ 0.12 · T<sub>e0</sub>.
+          </p>
+          <p>
+            The core Te is rescaled after profile construction so that the profile-integrated
+            stored energy matches the 0D W<sub>th</sub> from the transport model. The pedestal
+            height is preserved (set by MHD stability), and only the core peaking adjusts.
           </p>
         </Section>
 
@@ -686,7 +726,7 @@ export default function Bibliography() {
             {'V = 2π² R₀ a² κ  [plasma volume, m³]'}
           </Eq>
           <p>
-            Wall/limiter outlines for DIII-D, JET, and ITER are parameterized from published machine
+            Wall/limiter outlines for DIII-D, JET, ITER, and CENTAUR are parameterized from published machine
             geometries and used for both the equilibrium cross-section display and the 3D port view
             rendering.
           </p>

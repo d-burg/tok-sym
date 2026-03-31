@@ -350,7 +350,7 @@ const STEPS: TutorialStep[] = [
           <ul className="space-y-0.5">
             <li><b>▶ Start / ⏸ Pause</b> — run or pause the discharge</li>
             <li><b>Speed buttons</b> — 0.5x to 2x playback speed</li>
-            <li><b>Device dropdown</b> — switch between tokamaks (DIII-D, JET, ITER)</li>
+            <li><b>Device dropdown</b> — switch between tokamaks (DIII-D, JET, ITER, CENTAUR)</li>
             <li><b>Preset buttons</b> — H-mode, L-mode, or Density Limit scenarios</li>
             <li><b>📋 Edit</b> — open the shot planner to customize the discharge program</li>
             <li><b>After discharge</b> — click on the trace panel to scrub through time</li>

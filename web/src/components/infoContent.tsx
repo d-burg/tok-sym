@@ -155,8 +155,10 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
     <>
       <b>H-factor (H<sub>98</sub>)</b> &mdash; confinement quality relative
       to the ITER IPB98(y,2) scaling law. H = 1.0 is the baseline;
-      H &gt; 1 indicates better-than-expected confinement. ITER's Q = 10
-      scenario targets H<sub>98</sub> &asymp; 1.0.{' '}
+      H &gt; 1 indicates better-than-expected confinement. The effective
+      H-factor includes corrections for triangularity, D-T isotope effects,
+      and device-specific tuning. ITER's Q = 10 scenario targets
+      H<sub>98</sub> &asymp; 1.0.{' '}
       <Cite doi="10.1088/0029-5515/39/12/301">ITER Physics Basis, Nucl. Fusion 39 (1999)</Cite>.
     </>
   ),
@@ -198,9 +200,12 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
   te_ped: (
     <>
       <b>Pedestal electron temperature (T<sub>e,ped</sub>)</b> &mdash; the
-      temperature at the top of the H-mode pedestal. Along with
-      n<sub>e,ped</sub>, it determines the pedestal pressure, which
-      strongly influences overall confinement and fusion performance.
+      temperature at the top of the H-mode pedestal. Scales with
+      triangularity (higher &delta; stabilizes peeling-ballooning modes,
+      allowing higher pedestals). Along with n<sub>e,ped</sub>, it
+      determines the pedestal pressure, which strongly influences overall
+      confinement and fusion performance. In NT plasmas, a small
+      ballooning-limited pedestal persists without a full H-mode barrier.
     </>
   ),
   ne_line: (
@@ -232,8 +237,10 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
   p_rad: (
     <>
       <b>Radiated power (P<sub>rad</sub>)</b> &mdash; power lost by
-      electromagnetic radiation, primarily bremsstrahlung and line
-      radiation from impurities. Measured by bolometer arrays.
+      electromagnetic radiation: bremsstrahlung, intrinsic impurity
+      radiation from wall materials (carbon, tungsten), and intentional
+      impurity seeding (neon). Measured by bolometer arrays. Typical
+      H-mode radiative fractions are 15&ndash;30%.
       High P<sub>rad</sub>/P<sub>in</sub> ratios can lead to radiative
       collapse.
     </>

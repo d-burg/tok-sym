@@ -27,28 +27,75 @@ eps = a/R0, kappa is elongation, and M is the average ion mass in AMU.
 |------|----------|-------|
 | L-mode | 0.5 | IPB98 is calibrated to H-mode; L-mode is ~0.5x |
 | H-mode | 1.0 | Standard Type I ELMy H-mode |
-| NT-edge (CENTAUR) | ~0.82 | Between L-mode and H-mode; ELM-free |
+| NT-edge (CENTAUR) | ~0.65 | ~65% of H-mode; ELM-free, ballooning-limited edge |
 
-### 1.3 D-T Isotope Enhancement
+### 1.3 Triangularity Correction
 
-D-T plasmas receive a 1.35x confinement enhancement beyond the IPB98 M^0.19
-scaling, representing the improved core confinement observed experimentally
-in JET DTE2 and TFTR D-T campaigns. This is attributed to alpha heating
-profile peaking and reduced turbulent transport.
+Higher positive triangularity (delta) stabilizes edge peeling-ballooning
+modes, broadens the pressure profile, and improves energy confinement.
+This effect is not captured by IPB98 (which omits delta). The correction:
+
+    tau_E *= 1.0 + 0.20 * (delta - 0.40)    [clamped to 0.92–1.10]
+
+At the typical H-mode reference delta=0.40, no correction is applied. At
+ITER's delta=0.55, tau_E increases by ~3%. At low delta=0.20, tau_E
+decreases by ~4%. This also affects Te_ped through improved pedestal
+stability (see Section 9).
+
+The correction applies in H-mode only (positive delta). Negative-delta
+NT plasmas handle confinement through the h_factor multiplier instead.
+
+### 1.4 D-T Isotope Enhancement
+
+D-T plasmas receive a 1.10x confinement enhancement beyond the IPB98 M^0.19
+scaling, representing residual isotope effects on turbulent transport beyond
+what the mass scaling captures (e.g., reduced ITG growth rates). The IPB98
+M^0.19 already gives ~1.19x for DT (M=2.5) vs DD (M=2.0), so the total
+confinement advantage from mass alone is 1.19 × 1.10 = 1.31x on tau_E.
+The dominant DT performance advantage comes from alpha self-heating, which
+drives higher Te and W_th through the positive feedback loop in the power
+balance.
 
 **References:**
 - Cordey et al., Nucl. Fusion 39 (1999) 301
 - Maggi et al., Plasma Phys. Control. Fusion 60 (2018) 014045
 
-### 1.4 Negative Triangularity Enhancement
+### 1.5 Negative Triangularity Confinement
 
-For negative-triangularity devices (CENTAUR), a 1.05x confinement boost is
-applied on top of the base H-factor. This represents the improved core
-confinement observed in NT plasmas due to modified turbulence characteristics.
+For negative-triangularity devices (CENTAUR), the confinement factor is set
+to h=0.65 (between L-mode and H-mode). An additional 1.05x DT isotope boost
+is applied for DT fuel. NT plasmas operate ELM-free with a small
+ballooning-limited pedestal rather than the full H-mode transport barrier.
 
 **References:**
 - Marinoni et al., Nucl. Fusion 61 (2021) 116010
 - Austin et al., Phys. Rev. Lett. 122 (2019) 115001
+
+### 1.6 Device-Specific Confinement Correction
+
+A per-device correction factor multiplies tau_E to account for effects not
+captured by generic scalings (wall conditioning, NBI deposition geometry,
+divertor closure, etc.):
+
+| Device | Factor | Justification |
+|--------|--------|---------------|
+| DIII-D | 1.00 | IPB98 calibrated to DIII-D data directly |
+| JET | 1.35 | DTE2 optimized scenarios (high shaping, ILW conditioning) |
+| ITER | 1.00 | Reference machine for IPB98 extrapolation |
+| CENTAUR | 1.00 | Conceptual design, no empirical correction |
+
+### 1.7 Intrinsic Radiation
+
+Intrinsic impurity radiation from wall materials (carbon, tungsten,
+beryllium) is modeled as a fraction of external heating power:
+
+    P_intrinsic = (0.10 * max(Z_eff - 1, 0.2) + 0.05) * P_external
+
+This produces ~10-15% radiative fraction for typical H-mode parameters,
+consistent with experimental observations in well-conditioned machines.
+The scaling with P_external (rather than ne^2 * V) avoids unphysical
+machine-size dependence and ensures the intrinsic radiation doesn't
+suppress the alpha self-heating loop in burning plasmas.
 
 ---
 
@@ -64,17 +111,24 @@ which is accurate to within 1% over the range 0.2-100 keV.
 ~3.65 MeV per reaction on average.
 
 The effective ion temperature for the volume-averaged reactivity is estimated
-as Ti_eff = 0.65 * Te0, accounting for profile peaking and the Ti/Te ratio.
+as Ti_eff = 0.70 * Te0, accounting for profile peaking and the Ti/Te ratio.
 
 **References:**
 - Bosch and Hale, Nucl. Fusion 32 (1992) 611
 
 ### 2.2 Profile Correction Factor
 
-The 0D fusion power uses a profile peaking correction f_profile = 0.45,
+The 0D alpha heating uses a profile peaking correction f_profile = 0.48,
 representing the ratio of the volume-averaged <n^2 * sigma_v(T)> to the
 product of volume-averaged quantities n_bar^2 * sigma_v(T_bar). This factor
 accounts for the fact that both density and temperature peak on axis.
+(Calibrated against full profile integration using Bosch-Hale over the
+51-point Te/ne profiles.)
+
+The displayed P_fus in the status panel and trace uses the full 51-point
+profile integration via `computeFusion()`, which integrates ne^2 * sigma_v(Te)
+over the tanh-pedestal profiles. The 0D f_profile estimate is used only for
+the alpha self-heating feedback in the transport power balance.
 
 ### 2.3 Q_plasma
 
@@ -99,7 +153,18 @@ ELM frequency scales inversely with energy confinement time (tau_E) to
 account for machine size: larger machines with longer tau_E have lower ELM
 frequency because the pedestal pressure gradient rebuilds more slowly.
 
-### 3.2 ELM Heat Flux to Divertor
+### 3.2 Pedestal Crash
+
+Each ELM applies an amplified fractional crash to the pedestal Te and ne:
+
+    Te_ped *= (1 - elm_fraction * 1.5)    [Type I]
+    Te_ped *= (1 - elm_fraction * 1.2)    [Type II]
+    ne_ped *= (1 - elm_fraction * 0.8 * amplification)
+
+The pedestal recovery time is 100ms (tau_ped), representing the inter-ELM
+pedestal pressure gradient rebuild.
+
+### 3.3 ELM Heat Flux to Divertor
 
 The ELM energy to the divertor is calculated from the Loarte scaling:
 
@@ -222,9 +287,11 @@ analytically with Shafranov shift and shaping corrections.
 
 ### 6.2 Safety Factor
 
-    q95 = 5 * a^2 * Bt * kappa_eff / (R0 * Ip)
+    q95 = 5 * a^2 * Bt * f_shape / (R0 * Ip)
 
-where kappa_eff includes corrections for elongation and triangularity.
+where the shape factor includes elongation and triangularity:
+
+    f_shape = (1 + kappa^2 * (1 + 2*delta^2 - 1.2*delta^3)) / 2
 
 ### 6.3 Normalized Beta
 
@@ -271,3 +338,59 @@ All simulated diagnostic signals include realistic measurement noise:
 
 D-alpha signals include ELM spikes (8x baseline for Type I, 2.5x for Type II)
 with appropriate noise to reproduce the irregular appearance of real signals.
+
+---
+
+## 9. Radial Profiles and 0D Coupling
+
+### 9.1 Profile Parameterization
+
+H-mode profiles use the OMFIT tanh-pedestal parameterization with independently
+shaped core and pedestal regions. L-mode uses a simple parabolic model.
+
+### 9.2 0D → Profile Coupling
+
+The 0D transport model determines W_th from power balance and derives:
+
+    Te_avg = W_th / (3 * ne_vol * V * 1.602e-2)
+    Te0 = Te_avg * 2.5    (peaking factor)
+    ne0 = ne_bar * 1.3    (density peaking)
+
+The profile module then sets:
+
+    Te_core = Te0 (smoothed with 150ms tau)
+    Te_ped = ped_ratio * Te0, where ped_ratio = 0.30 + 0.20 * delta
+             (clamped to 0.25-0.50; positive delta only)
+    ne_core = ne0
+    ne_ped = 0.55 * ne0
+
+The pedestal height depends on triangularity: higher delta stabilizes
+peeling-ballooning modes, allowing higher pedestal pressure.
+
+For negative-triangularity (NT-edge) plasmas, a small ballooning-limited
+pedestal is maintained: Te_ped ≈ 0.12 * Te0, ne_ped ≈ 0.40 * ne0.
+
+### 9.3 Profile Energy Normalization
+
+After the profile parameters are set, the Te core value is rescaled so
+that the profile-integrated stored energy matches the 0D W_th:
+
+    W_profiles = integral(3 * ne(rho) * Te(rho) * dV) * 1.602e-2
+
+If W_profiles differs from W_th, Te_core is scaled by W_th/W_profiles
+(clamped to 0.6-1.8x). Only the core is adjusted — the pedestal height
+is preserved since it is set by MHD stability, not global energy content.
+
+### 9.4 Tuning Coefficients
+
+| Parameter | Value | Effect |
+|-----------|-------|--------|
+| Te0 peaking factor | 2.5 | Te0 = Te_avg * 2.5 |
+| ne0 peaking factor | 1.3 | ne0 = ne_bar * 1.3 |
+| ne_vol / ne_bar | 0.85 | Volume-average density |
+| Ped_ratio base | 0.30 | Te_ped / Te0 at delta=0 |
+| Ped_ratio delta coeff | 0.20 | Additional Te_ped per unit delta |
+| ne_ped / ne0 | 0.55 | ~0.72 * ne_bar in H-mode |
+| NT Te_ped / Te0 | 0.12 | Small ballooning-limited pedestal |
+| Pedestal tau | 100 ms | Pedestal recovery timescale |
+| Core smoothing tau | 150 ms | Core ELM resilience |

@@ -53,9 +53,10 @@ transport, profiles, and disruption physics. A React/TypeScript frontend renders
 2D cross-sections, time traces, radial profiles, 3D port views, and a full control
 room interface.
 
-Three tokamak devices are modeled: **DIII-D**, **JET**, and **ITER**, each with
-device-specific geometry, heating limits, and wall outlines. Three discharge presets
-are available per device: **H-mode**, **L-mode**, and **Density Limit**.
+Four tokamak devices are modeled: **DIII-D**, **JET**, **ITER**, and **CENTAUR**
+(conceptual negative-triangularity), each with device-specific geometry, heating
+limits, and wall outlines. Three discharge presets are available per device:
+**H-mode**, **L-mode**, and **Density Limit**.
 
 The simulator uses 0D (volume-averaged) power balance with analytic equilibrium
 reconstruction, making it fast enough to run at 200 physics steps per second in the
@@ -83,7 +84,7 @@ fusion-sim/
 │           ├── equilibrium.rs  # Cerfon-Freidberg Grad-Shafranov solver
 │           ├── transport.rs    # 0D power balance model
 │           ├── profiles.rs     # Tanh-pedestal radial profiles
-│           ├── devices.rs      # DIII-D, JET, ITER definitions
+│           ├── devices.rs      # DIII-D, JET, ITER, CENTAUR definitions
 │           ├── disruption.rs   # Disruption risk & dynamics
 │           ├── diagnostics.rs  # Synthetic diagnostic signals
 │           ├── contour.rs      # Marching squares contour extraction
@@ -308,13 +309,14 @@ Each `step(dt)` call advances the plasma state:
 3. **Safety factor q95:** Computed from Ip, Bt, R0, a, kappa with shape correction
 4. **Greenwald fraction:** f_GW = ne / n_GW where n_GW = Ip / (pi * a^2)
 5. **Ohmic heating:** Spitzer resistivity with Zeff correction
-6. **Radiation losses:** Bremsstrahlung + line radiation + neon impurity radiation
+6. **Radiation losses:** Bremsstrahlung + intrinsic impurity radiation (fraction of P_external) + neon seeding
 7. **L-H transition:** Martin 2008 power threshold scaling P_LH ~ ne^0.78 * Bt^0.77 * S^0.98
-8. **Energy confinement:** IPB98(y,2) scaling tau_E ~ Ip^0.93 * Bt^0.15 * ne^0.41 * ...
-9. **Power balance:** dW/dt = P_heat - W/tau_E - P_rad, with implicit/explicit split
+8. **Energy confinement:** IPB98(y,2) with triangularity correction, DT isotope boost (1.10×),
+    device-specific confinement factor (e.g., JET 1.35×), and NT-edge mode (h=0.65)
+9. **Power balance:** dW/dt = P_heat - W/tau_E - P_rad, with alpha self-heating feedback
 10. **ELM model:** Type I (large, periodic), Type II (grassy, high shaping),
     QCE (quasi-continuous exhaust) with stochastic timing via xorshift PRNG
-11. **Temperature:** Derived from W_th = (3/2) * ne * V * Te
+11. **Temperature:** Derived from W_th with peaking factor 2.5: Te0 = (W_th / (3*ne*V*0.016)) * 2.5
 12. **Beta limits:** beta_N clamped to Troyon limit (beta_N,max = 2.8 * I_N)
 
 #### Key Functions
@@ -362,10 +364,13 @@ where `mtanh` includes the polynomial core contribution (expin, expout terms).
 This captures the sharp pedestal structure characteristic of H-mode plasmas.
 
 Profiles are updated from the 0D transport state with physically motivated
-smoothing:
-- **Pedestal:** 200ms smoothing time constant
+smoothing and energy normalization:
+- **Pedestal:** 100ms smoothing time constant, height depends on triangularity
 - **Core:** 150ms smoothing time constant
-- **ELM crash:** Pedestal drops to 60% of pre-ELM value on ELM onset
+- **ELM crash:** Pedestal crash fraction = 1.5× global energy loss (Type I), 1.2× (Type II)
+- **Energy normalization:** Te_core scaled so profile-integrated W matches 0D W_th
+  (pedestal preserved since it is MHD-stability-limited)
+- **NT-edge:** Small ballooning-limited pedestal (Te_ped ≈ 12% of Te0)
 
 #### Key Functions
 
@@ -375,7 +380,8 @@ smoothing:
 | `diiid_te_params()`, `iter_te_params()`, `jet_te_params()` | Device-specific Te profile shapes |
 | `diiid_ne_params()`, `iter_ne_params()`, `jet_ne_params()` | Device-specific ne profile shapes |
 | `Profiles::new()` | Creates flat (cold) profiles |
-| `Profiles::update_from_0d()` | Maps 0D transport state to radial profiles |
+| `Profiles::update_from_0d()` | Maps 0D transport state to radial profiles (includes delta-dependent pedestal) |
+| `Profiles::normalize_to_energy()` | Rescales Te_core so profile-integrated W matches 0D W_th |
 | `compute_li()` | Computes internal inductance li from Spitzer conductivity profile |
 
 #### Tests (10 tests)
@@ -702,7 +708,7 @@ Tracks: `snapshot` (latest), `displaySnapshot` (current display — live or scru
 | `switchPreset(device, preset)` | Switch device and/or preset |
 | `runProgram(device, json)` | Run custom program from Shot Planner |
 | `setScrubTime(t \| null)` | Scrub to historical time (or null to return to live) |
-| `setSpeed(multiplier)` | Adjust simulation speed (0.5x to 4x) |
+| `setSpeed(multiplier)` | Adjust simulation speed (0.5x to 2x) |
 
 #### Animation Loop
 
@@ -979,7 +985,7 @@ App.tsx routes:
 
 ### DeviceSelect
 
-Landing page with cards for DIII-D, JET, and ITER. Each card shows device
+Landing page with cards for DIII-D, JET, ITER, and CENTAUR. Each card shows device
 parameters (R0, a, Bt, Ip) and links to the ProgramDischarge page.
 
 ### ProgramDischarge
@@ -992,7 +998,7 @@ button navigates to ControlRoom.
 
 The main simulation page. Features:
 - **Top bar:** Device selector, preset selector (button group), playback controls
-  (Start/Pause/Reset), speed selector (0.5x-4x), Shot Planner toggle
+  (Start/Pause/Reset), speed selector (0.5x-2x), Shot Planner toggle
 - **Main grid:** 2x3 CSS grid with EquilibriumCanvas (top-left), UnifiedTracePanel
   (top-right, spanning 2 columns), StatusPanel (bottom-left, spanning 2 columns),
   PortView (bottom-right)

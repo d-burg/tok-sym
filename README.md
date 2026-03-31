@@ -7,8 +7,9 @@ for exploring tokamak plasma behavior.
 
 ## Features
 
-- **Three tokamak devices:** DIII-D, JET, and ITER with device-specific
-  geometry, heating systems, and engineering limits
+- **Four tokamak devices:** DIII-D, JET, ITER, and CENTAUR (conceptual
+  negative-triangularity) with device-specific geometry, heating systems,
+  and engineering limits
 - **Three discharge presets per device:** H-mode, L-mode, and Density Limit
   scenarios with realistic waveform programming
 - **Real-time physics:** 0D power balance transport, analytic Grad-Shafranov
@@ -114,7 +115,7 @@ fusion-sim/
 │       ├── equilibrium.rs   Cerfon-Freidberg Grad-Shafranov solver
 │       ├── transport.rs     0D power balance (IPB98, L-H, ELMs)
 │       ├── profiles.rs      Tanh-pedestal radial profiles
-│       ├── devices.rs       DIII-D, JET, ITER definitions
+│       ├── devices.rs       DIII-D, JET, ITER, CENTAUR definitions
 │       ├── disruption.rs    Disruption risk & dynamics
 │       ├── diagnostics.rs   Synthetic diagnostic signals
 │       ├── contour.rs       Marching squares contour extraction
