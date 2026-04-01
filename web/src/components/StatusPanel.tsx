@@ -337,7 +337,6 @@ function PowerBalance({ snapshot: s, fusion }: { snapshot: Snapshot; fusion: Fus
 function QDisplay({ fusion }: { fusion: FusionState | null }) {
   const rawQ = fusion?.q_plasma ?? 0
   const rawPFus = fusion?.p_fus ?? 0
-  const fuelType = fusion?.fuel_type ?? 'DD'
 
   // EMA smoothing — prevents ELM-driven jitter and P_fus toggling
   const smoothQ = useRef(0)

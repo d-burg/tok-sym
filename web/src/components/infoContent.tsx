@@ -295,7 +295,7 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
 
 /* ─── Trace panel (composite) ────────────────────────── */
 
-export function traceInfoContent(traces: { key: string; label: string; unit: string; color: string }[]) {
+export function traceInfoContent(traces: { key: string; base: string; sub: string; unit: string; color: string }[]) {
   return (
     <>
       <p className="mb-2">
@@ -310,7 +310,7 @@ export function traceInfoContent(traces: { key: string; label: string; unit: str
               style={{ backgroundColor: t.color }}
             />
             <span className="text-gray-200 font-bold text-[11px]">
-              {t.label}
+              {t.base}<sub>{t.sub}</sub>
               {t.unit && <span className="text-gray-500 font-normal ml-1">[{t.unit}]</span>}
             </span>
           </div>
