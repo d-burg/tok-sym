@@ -21,29 +21,39 @@ interface TraceConfig {
 }
 
 const ALL_TRACES: TraceConfig[] = [
+  // Single-char subscripts use Unicode (ₚ ₑ ₙ ᵢ ₀ ₅ ₈ ₉ ₜ ₕ).
+  // Multi-char subscripts use regular lowercase for consistent rendering,
+  // since Unicode has no subscript d, f, g, w, etc.
   { key: 'ip',               label: 'Iₚ',        unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
-  { key: 'beta_n',           label: 'βN',        unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
+  { key: 'beta_n',           label: 'βₙ',        unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
   { key: 'li',               label: 'lᵢ',        unit: '',         color: '#38bdf8', yMin: 0, yMax: 1.5 },
   { key: 'd_alpha',          label: 'Dα',        unit: 'a.u.',     color: '#fb7185' },
   { key: 'q95',              label: 'q₉₅',       unit: '',         color: '#a78bfa', yMax: 10 },
   { key: 'h_factor',         label: 'H₉₈',       unit: '',         color: '#34d399' },
   { key: 'f_greenwald',      label: 'fGW',        unit: '',         color: '#f472b6' },
   { key: 'ne_bar',           label: 'n\u0305ₑ',   unit: '10²⁰/m³', color: '#60a5fa' },
-  { key: 'ne_ped',           label: 'nₑ,ₚₑd',    unit: '10²⁰/m³', color: '#818cf8' },
+  { key: 'ne_ped',           label: 'nₑ,ped',     unit: '10²⁰/m³', color: '#818cf8' },
   { key: 'te0',              label: 'Tₑ₀',       unit: 'keV',      color: '#f97316' },
-  { key: 'te_ped',           label: 'Tₑ,ₚₑd',   unit: 'keV',      color: '#fb923c' },
-  { key: 'ne_line',          label: 'nₑ,line',   unit: '10²⁰/m³', color: '#67e8f9' },
-  { key: 'w_th',             label: 'Wₜₕ',       unit: 'MJ',       color: '#4ade80' },
-  { key: 'p_input',          label: 'Pᵢₙ',       unit: 'MW',       color: '#facc15' },
-  { key: 'p_rad',            label: 'Pᵣₐd',      unit: 'MW',       color: '#e879f9' },
+  { key: 'te_ped',           label: 'Tₑ,ped',    unit: 'keV',      color: '#fb923c' },
+  { key: 'ne_line',          label: 'nₑ,line',    unit: '10²⁰/m³', color: '#67e8f9' },
+  { key: 'w_th',             label: 'Wth',        unit: 'MJ',       color: '#4ade80' },
+  { key: 'p_input',          label: 'Pin',        unit: 'MW',       color: '#facc15' },
+  { key: 'p_rad',            label: 'Prad',       unit: 'MW',       color: '#e879f9' },
   { key: 'p_fus',            label: 'Pfus',       unit: 'MW',       color: '#ff6b6b' },
-  { key: 'p_loss',           label: 'Pₗₒₛₛ',     unit: 'MW',       color: '#c084fc' },
-  { key: 'v_loop',           label: 'Vₗₒₒₚ',     unit: 'V',        color: '#2dd4bf' },
-  { key: 'impurity_fraction',    label: 'fᵢₘₚ',     unit: '%',        color: '#86efac' },
-  { key: 'disruption_risk',  label: 'Dᵣᵢₛₖ',     unit: '',         color: '#ef4444' },
+  { key: 'p_loss',           label: 'Ploss',      unit: 'MW',       color: '#c084fc' },
+  { key: 'v_loop',           label: 'Vloop',      unit: 'V',        color: '#2dd4bf' },
+  { key: 'impurity_fraction',    label: 'fimp',       unit: '%',        color: '#86efac' },
+  { key: 'disruption_risk',  label: 'Drisk',      unit: '',         color: '#ef4444' },
 ]
 
-const DEFAULT_KEYS = new Set(['ip', 'beta_n', 'p_fus', 'd_alpha'])
+// Default traces vary by device: ITER and CENTAUR show P_fus (burning plasma),
+// DIII-D and JET show stored energy W_th (more relevant for non-burning devices).
+function defaultKeysForDevice(deviceId: string): Set<string> {
+  if (deviceId === 'iter' || deviceId === 'centaur') {
+    return new Set(['ip', 'beta_n', 'p_fus', 'd_alpha'])
+  }
+  return new Set(['ip', 'beta_n', 'w_th', 'd_alpha'])
+}
 
 const MARGIN_LEFT = 56
 const MARGIN_RIGHT = 64
@@ -75,7 +85,13 @@ export default function UnifiedTracePanel({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set(DEFAULT_KEYS))
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => defaultKeysForDevice(deviceId))
+  // Reset defaults when device changes
+  const prevDeviceRef = useRef(deviceId)
+  if (deviceId !== prevDeviceRef.current) {
+    prevDeviceRef.current = deviceId
+    setSelectedKeys(defaultKeysForDevice(deviceId))
+  }
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { theme } = useSettings()

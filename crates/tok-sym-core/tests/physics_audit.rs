@@ -309,7 +309,7 @@ fn run_and_average(
             transport.elm_ped_crash_frac,
             prog.delta,
         );
-        profiles.normalize_to_energy(transport.w_th, device.volume);
+        profiles.normalize_to_energy(transport.w_th, device.volume, dt, transport.tau_e);
         transport.li = profiles.compute_li();
 
         if i % sample_interval == 0 {

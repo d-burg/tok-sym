@@ -381,6 +381,13 @@ If W_profiles differs from W_th, Te_core is scaled by W_th/W_profiles
 (clamped to 0.6-1.8x). Only the core is adjusted — the pedestal height
 is preserved since it is set by MHD stability, not global energy content.
 
+The W_th input to normalization is smoothed with a time constant equal
+to tau_E (minimum 50ms), preventing ELM crashes from instantly
+propagating to the core profile. This reflects the physical reality
+that fusion reactions are concentrated in the hot core, which acts as
+a thermal low-pass filter — edge perturbations propagate inward on the
+energy confinement timescale, not the ELM crash timescale.
+
 ### 9.4 Tuning Coefficients
 
 | Parameter | Value | Effect |
