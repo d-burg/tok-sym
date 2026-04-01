@@ -57,6 +57,7 @@ export function useSimulation(
   const programJsonRef = useRef<string>('{}')
   const speedRef = useRef(1.0)
   const stepAccRef = useRef(0.0)  // fractional step accumulator for sub-1x speeds
+  const pFusSmoothedRef = useRef(0.0) // smoothed P_fus for ELM resilience
   const profileFramesRef = useRef<ProfileFrame[]>([])
   const lastProfileTimeRef = useRef<number>(-Infinity)
 
@@ -101,6 +102,7 @@ export function useSimulation(
     }
     simRef.current = handle
     historyRef.current = []
+    pFusSmoothedRef.current = 0
     snapshotHistoryRef.current = []
     profileFramesRef.current = []
     lastProfileTimeRef.current = -Infinity
@@ -138,6 +140,7 @@ export function useSimulation(
     }
     simRef.current = handle
     historyRef.current = []
+    pFusSmoothedRef.current = 0
     snapshotHistoryRef.current = []
     profileFramesRef.current = []
     lastProfileTimeRef.current = -Infinity
@@ -266,8 +269,19 @@ export function useSimulation(
         te_ped: snap.te_ped,
         ne_line: snap.ne_line,
         impurity_fraction: snap.impurity_fraction,
-        p_fus: currentDeviceObjRef.current
-          ? computeFusion(snap!, currentDeviceObjRef.current).p_fus : 0,
+        p_fus: (() => {
+          const raw = currentDeviceObjRef.current
+            ? computeFusion(snap!, currentDeviceObjRef.current).p_fus : 0
+          // Smooth P_fus with tau_E to filter ELM-scale fluctuations.
+          // Fusion reactions are concentrated in the hot core, which acts
+          // as a thermal low-pass filter — edge ELM crashes don't affect
+          // core fusion rate on ELM timescales.
+          const tau = Math.max(snap!.tau_e ?? 0.1, 0.05)
+          const dt = totalSteps * DT
+          const alpha = Math.min(dt / tau, 1.0)
+          pFusSmoothedRef.current += (raw - pFusSmoothedRef.current) * alpha
+          return pFusSmoothedRef.current
+        })(),
         elm_suppressed: snap.elm_suppressed,
         elm_active: anyElmActive,
       }
@@ -352,6 +366,7 @@ export function useSimulation(
       simRef.current.reset()
     }
     historyRef.current = []
+    pFusSmoothedRef.current = 0
     snapshotHistoryRef.current = []
     profileFramesRef.current = []
     lastProfileTimeRef.current = -Infinity
