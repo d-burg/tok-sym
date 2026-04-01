@@ -407,7 +407,7 @@ impl Profiles {
     ///
     /// `elm_ped_crash` is a fractional crash applied directly to the pedestal
     /// when an ELM fires (0.0 = no ELM, >0 = pedestal drops by this fraction).
-    pub fn update_from_0d(&mut self, te0: f64, ne0: f64, h_mode: bool, dt: f64, elm_ped_crash: f64, delta: f64) {
+    pub fn update_from_0d(&mut self, te0: f64, ne0: f64, h_mode: bool, dt: f64, elm_ped_crash: f64, delta: f64, tau_e: f64) {
         let l_to_h = h_mode && !self.prev_h_mode;
         self.h_mode = h_mode;
         self.prev_h_mode = h_mode;
@@ -423,7 +423,10 @@ impl Profiles {
         self.ne0_lmode = ne0.max(0.01);
 
         // ── Smooth core tracking (used by both modes) ──
-        let tau_core = 0.15; // 150ms — slow enough to ride through ELM dips
+        // Use tau_E as the smoothing constant: core temperature responds on
+        // the energy confinement timescale, not the ELM crash timescale.
+        // Minimum 100ms to avoid jitter during ramp-up when tau_E is small.
+        let tau_core = tau_e.max(0.10);
         let alpha_core = (dt / tau_core).min(1.0);
         self.te0_core_smooth += (te0 - self.te0_core_smooth) * alpha_core;
         self.ne0_core_smooth += (ne0 - self.ne0_core_smooth) * alpha_core;
@@ -592,11 +595,11 @@ mod tests {
         let mut p = Profiles::default();
 
         // Transition to H-mode first (pedestal starts at edge)
-        p.update_from_0d(5.0, 0.8, true, 0.005, 0.0, 0.5);
+        p.update_from_0d(5.0, 0.8, true, 0.005, 0.0, 0.5, 0.13);
         let te_ped_1 = p.te_ped;
 
         // Large change in core Te — pedestal should be smoothed
-        p.update_from_0d(8.0, 0.8, true, 0.005, 0.0, 0.5);
+        p.update_from_0d(8.0, 0.8, true, 0.005, 0.0, 0.5, 0.13);
         let te_ped_2 = p.te_ped;
 
         // Pedestal should not jump instantly (smoothed by tau_ped = 0.1s)
@@ -613,12 +616,12 @@ mod tests {
         let mut p = Profiles::default();
         // Run several L-mode steps to fully ramp down the default pedestal
         for _ in 0..200 {
-            p.update_from_0d(3.0, 0.6, false, 0.005, 0.0, 0.5);
+            p.update_from_0d(3.0, 0.6, false, 0.005, 0.0, 0.5, 0.13);
         }
         assert_eq!(p.te_ped, 0.0);
 
         // Transition to H-mode — pedestal should start near edge, NOT at default 0.83
-        p.update_from_0d(3.0, 0.6, true, 0.005, 0.0, 0.5);
+        p.update_from_0d(3.0, 0.6, true, 0.005, 0.0, 0.5, 0.13);
         assert!(
             p.te_ped < 0.2,
             "On L→H transition, te_ped={} should start near edge (~0.07), not jump to H-mode default",
@@ -632,7 +635,7 @@ mod tests {
 
         // After many H-mode steps, pedestal should build up toward target
         for _ in 0..200 {
-            p.update_from_0d(3.0, 0.6, true, 0.005, 0.0, 0.5);
+            p.update_from_0d(3.0, 0.6, true, 0.005, 0.0, 0.5, 0.13);
         }
         assert!(
             p.te_ped > 0.5,
@@ -646,13 +649,13 @@ mod tests {
         let mut p = Profiles::default();
         // Establish H-mode with built-up pedestal
         for _ in 0..200 {
-            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0, 0.5);
+            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0, 0.5, 0.13);
         }
         let te_ped_before = p.te_ped;
         assert!(te_ped_before > 0.5, "Pedestal should be well-established");
 
         // Transition to L-mode — pedestal should NOT zero instantly
-        p.update_from_0d(2.0, 0.5, false, 0.005, 0.0, 0.5);
+        p.update_from_0d(2.0, 0.5, false, 0.005, 0.0, 0.5, 0.13);
         assert!(
             p.te_ped > te_ped_before * 0.5,
             "On H→L transition, te_ped={} should not drop instantly from {}",
@@ -662,7 +665,7 @@ mod tests {
 
         // After many L-mode steps, pedestal should decay toward zero
         for _ in 0..100 {
-            p.update_from_0d(2.0, 0.5, false, 0.005, 0.0, 0.5);
+            p.update_from_0d(2.0, 0.5, false, 0.005, 0.0, 0.5, 0.13);
         }
         assert!(
             p.te_ped == 0.0 || p.te_ped < 0.15,
@@ -676,7 +679,7 @@ mod tests {
         let mut p = Profiles::default();
         // Build up H-mode with established pedestal
         for _ in 0..400 {
-            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0, 0.5);
+            p.update_from_0d(4.0, 0.7, true, 0.005, 0.0, 0.5, 0.13);
         }
         let te_core_before = p.te_params.core;
         let te_ped_before = p.te_params.ped;
@@ -684,7 +687,7 @@ mod tests {
         assert!(te_ped_before > 0.5, "Pedestal should be well-established: {te_ped_before}");
 
         // Apply ELM crash (15% pedestal crash fraction)
-        p.update_from_0d(3.6, 0.7, true, 0.001, 0.15, 0.5);
+        p.update_from_0d(3.6, 0.7, true, 0.001, 0.15, 0.5, 0.13);
         let te_core_after = p.te_params.core;
         let te_ped_after = p.te_params.ped;
         let ne_ped_after = p.ne_params.ped;

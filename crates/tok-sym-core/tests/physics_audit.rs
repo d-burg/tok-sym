@@ -293,6 +293,7 @@ fn run_and_average(
             dt,
             transport.elm_ped_crash_frac,
             prog.delta,
+            transport.tau_e,
         );
         transport.li = profiles.compute_li();
     }
@@ -308,6 +309,7 @@ fn run_and_average(
             dt,
             transport.elm_ped_crash_frac,
             prog.delta,
+            transport.tau_e,
         );
         profiles.normalize_to_energy(transport.w_th, device.volume, dt, transport.tau_e);
         transport.li = profiles.compute_li();

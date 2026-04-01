@@ -636,6 +636,7 @@ impl Simulation {
             dt,
             self.transport.elm_ped_crash_frac,
             prog.delta,
+            self.transport.tau_e,
         );
 
         // ── Normalize profiles to 0D stored energy ──
