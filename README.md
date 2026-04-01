@@ -1,6 +1,6 @@
 # fusionsimulator.io
 
-A real-time tokamak plasma simulator that runs entirely in the browser.
+A real-time tokamak plasma simulator that runs entirely in your browser.
 fusionsimulator.io combines a Rust physics engine (compiled to WebAssembly) with a
 React/TypeScript frontend to provide an interactive control room experience
 for exploring tokamak plasma behavior.
