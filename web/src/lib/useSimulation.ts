@@ -8,10 +8,10 @@ const DT = 0.005 // 5 ms physics timestep
 // Trace history (lightweight: ~200 bytes/entry) — large buffer for full-discharge coverage.
 // 30,000 entries ≈ 500s at 60fps (enough for ITER 400s shots at 1x speed). ~6 MB.
 const MAX_TRACE_HISTORY = 30000
-// Snapshot history (heavy: ~50 KB/entry with equilibrium contours) — moderate buffer.
-// 2,000 entries ≈ 33s at 60fps. Post-discharge scrubbing uses time-based lookup,
-// so sparser snapshots just mean slightly less smooth equilibrium scrubbing.  ~100 MB max.
-const MAX_SNAPSHOT_HISTORY = 2000
+// Snapshot history (heavy: ~50 KB/entry with equilibrium contours).
+// 8,000 entries ≈ 133s at 60fps — enough for ITER's full 100s discharge.
+// Post-discharge scrubbing uses time-based lookup. ~400 MB max.
+const MAX_SNAPSHOT_HISTORY = 8000
 
 export interface SimState {
   snapshot: Snapshot | null            // live (latest) snapshot

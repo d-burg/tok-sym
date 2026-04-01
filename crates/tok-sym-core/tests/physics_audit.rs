@@ -311,7 +311,6 @@ fn run_and_average(
             prog.delta,
             transport.tau_e,
         );
-        profiles.normalize_to_energy(transport.w_th, device.volume, dt, transport.tau_e);
         transport.li = profiles.compute_li();
 
         if i % sample_interval == 0 {

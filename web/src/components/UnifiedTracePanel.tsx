@@ -11,40 +11,63 @@ import { useSettings } from '../lib/settingsContext'
 
 interface TraceConfig {
   key: keyof TracePoint
-  label: string
+  base: string      // base symbol (e.g. 'β', 'P', 'T')
+  sub: string       // subscript text (e.g. 'N', 'fus', 'e,ped')
   unit: string
   color: string
   targetKey?: 'ip' | 'beta_n'
   clampToTarget?: boolean
-  yMin?: number // hard floor for y-axis (e.g. li ≥ 0)
-  yMax?: number // hard ceiling for y-axis (e.g. q95 ≤ 10)
+  yMin?: number
+  yMax?: number
 }
 
 const ALL_TRACES: TraceConfig[] = [
-  // Single-char subscripts use Unicode (ₚ ₑ ₙ ᵢ ₀ ₅ ₈ ₉ ₜ ₕ).
-  // Multi-char subscripts use regular lowercase for consistent rendering,
-  // since Unicode has no subscript d, f, g, w, etc.
-  { key: 'ip',               label: 'Iₚ',        unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
-  { key: 'beta_n',           label: 'βₙ',        unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
-  { key: 'li',               label: 'lᵢ',        unit: '',         color: '#38bdf8', yMin: 0, yMax: 1.5 },
-  { key: 'd_alpha',          label: 'Dα',        unit: 'a.u.',     color: '#fb7185' },
-  { key: 'q95',              label: 'q₉₅',       unit: '',         color: '#a78bfa', yMax: 10 },
-  { key: 'h_factor',         label: 'H₉₈',       unit: '',         color: '#34d399' },
-  { key: 'f_greenwald',      label: 'fGW',        unit: '',         color: '#f472b6' },
-  { key: 'ne_bar',           label: 'n\u0305ₑ',   unit: '10²⁰/m³', color: '#60a5fa' },
-  { key: 'ne_ped',           label: 'nₑ,ped',     unit: '10²⁰/m³', color: '#818cf8' },
-  { key: 'te0',              label: 'Tₑ₀',       unit: 'keV',      color: '#f97316' },
-  { key: 'te_ped',           label: 'Tₑ,ped',    unit: 'keV',      color: '#fb923c' },
-  { key: 'ne_line',          label: 'nₑ,line',    unit: '10²⁰/m³', color: '#67e8f9' },
-  { key: 'w_th',             label: 'Wth',        unit: 'MJ',       color: '#4ade80' },
-  { key: 'p_input',          label: 'Pin',        unit: 'MW',       color: '#facc15' },
-  { key: 'p_rad',            label: 'Prad',       unit: 'MW',       color: '#e879f9' },
-  { key: 'p_fus',            label: 'Pfus',       unit: 'MW',       color: '#ff6b6b' },
-  { key: 'p_loss',           label: 'Ploss',      unit: 'MW',       color: '#c084fc' },
-  { key: 'v_loop',           label: 'Vloop',      unit: 'V',        color: '#2dd4bf' },
-  { key: 'impurity_fraction',    label: 'fimp',       unit: '%',        color: '#86efac' },
-  { key: 'disruption_risk',  label: 'Drisk',      unit: '',         color: '#ef4444' },
+  { key: 'ip',               base: 'I',     sub: 'p',       unit: 'MA',       color: '#22d3ee', targetKey: 'ip' },
+  { key: 'beta_n',           base: 'β',     sub: 'N',       unit: '',         color: '#fbbf24', targetKey: 'beta_n' },
+  { key: 'li',               base: 'l',     sub: 'i',       unit: '',         color: '#38bdf8', yMin: 0, yMax: 1.5 },
+  { key: 'd_alpha',          base: 'D',     sub: 'α',       unit: 'a.u.',     color: '#fb7185' },
+  { key: 'q95',              base: 'q',     sub: '95',      unit: '',         color: '#a78bfa', yMax: 10 },
+  { key: 'h_factor',         base: 'H',     sub: '98',      unit: '',         color: '#34d399' },
+  { key: 'f_greenwald',      base: 'f',     sub: 'GW',      unit: '',         color: '#f472b6' },
+  { key: 'ne_bar',           base: 'n\u0305', sub: 'e',     unit: '10²⁰/m³', color: '#60a5fa' },
+  { key: 'ne_ped',           base: 'n',     sub: 'e,ped',   unit: '10²⁰/m³', color: '#818cf8' },
+  { key: 'te0',              base: 'T',     sub: 'e0',      unit: 'keV',      color: '#f97316' },
+  { key: 'te_ped',           base: 'T',     sub: 'e,ped',   unit: 'keV',      color: '#fb923c' },
+  { key: 'ne_line',          base: 'n',     sub: 'e,line',  unit: '10²⁰/m³', color: '#67e8f9' },
+  { key: 'w_th',             base: 'W',     sub: 'th',      unit: 'MJ',       color: '#4ade80' },
+  { key: 'p_input',          base: 'P',     sub: 'in',      unit: 'MW',       color: '#facc15' },
+  { key: 'p_rad',            base: 'P',     sub: 'rad',     unit: 'MW',       color: '#e879f9' },
+  { key: 'p_fus',            base: 'P',     sub: 'fus',     unit: 'MW',       color: '#ff6b6b' },
+  { key: 'p_loss',           base: 'P',     sub: 'loss',    unit: 'MW',       color: '#c084fc' },
+  { key: 'v_loop',           base: 'V',     sub: 'loop',    unit: 'V',        color: '#2dd4bf' },
+  { key: 'impurity_fraction',base: 'f',     sub: 'imp',     unit: '%',        color: '#86efac' },
+  { key: 'disruption_risk',  base: 'D',     sub: 'risk',    unit: '',         color: '#ef4444' },
 ]
+
+/** Render a label with proper subscript on canvas.
+ *  Right-aligned at (x, y): base symbol at normal size, subscript smaller and lower. */
+function drawLabel(ctx: CanvasRenderingContext2D, cfg: TraceConfig, x: number, y: number, isRetro: boolean) {
+  const baseFont = isRetro ? '"VCR OSD Mono", "Courier New", monospace' : 'monospace'
+  const subFont = isRetro ? `8px ${baseFont}` : `8px ${baseFont}`
+  const mainFont = isRetro ? `11px ${baseFont}` : `bold 11px ${baseFont}`
+
+  // Measure subscript width first to position everything right-aligned
+  ctx.font = subFont
+  const subW = ctx.measureText(cfg.sub).width
+  ctx.font = mainFont
+  const baseW = ctx.measureText(cfg.base).width
+  const totalW = baseW + subW + 1 // 1px gap
+
+  // Draw base symbol
+  ctx.font = mainFont
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(cfg.base, x - totalW, y)
+
+  // Draw subscript: smaller, shifted down 3px
+  ctx.font = subFont
+  ctx.fillText(cfg.sub, x - subW, y + 3)
+}
 
 // Default traces vary by device: ITER and CENTAUR show P_fus (burning plasma),
 // DIII-D and JET show stored energy W_th (more relevant for non-burning devices).
@@ -56,7 +79,7 @@ function defaultKeysForDevice(deviceId: string): Set<string> {
 }
 
 const MARGIN_LEFT = 56
-const MARGIN_RIGHT = 64
+const MARGIN_RIGHT = 80
 const MARGIN_TOP = 4
 const MARGIN_BOTTOM = 2
 
@@ -399,12 +422,9 @@ export default function UnifiedTracePanel({
       // ── End row clipping ──
       ctx.restore()
 
-      // ── Label ──
+      // ── Label (base + subscript) ──
       ctx.fillStyle = traceColor
-      ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : 'bold 11px monospace'
-      ctx.textAlign = 'right'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(cfg.label, MARGIN_LEFT - 8, y0 + h / 2)
+      drawLabel(ctx, cfg, MARGIN_LEFT - 8, y0 + h / 2, isRetro)
 
       // ── Current / scrubbed value readout ──
       // When scrubbing, binary search for closest time in history
@@ -603,7 +623,7 @@ export default function UnifiedTracePanel({
                   className="w-2 h-2 rounded-full flex-shrink-0"
                   style={{ backgroundColor: t.color }}
                 />
-                <span className="text-gray-300">{t.label}</span>
+                <span className="text-gray-300">{t.base}<sub>{t.sub}</sub></span>
                 {t.unit && (
                   <span className="text-gray-500 ml-auto">{t.unit}</span>
                 )}

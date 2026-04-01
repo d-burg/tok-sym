@@ -587,12 +587,12 @@ impl TransportModel {
         } else {
             0.01
         };
-        // Central Te with peaking factor ~2.5.
-        // Typical H-mode tanh profiles have Te(0)/Te_vol_avg ≈ 2.0-3.0
-        // depending on pedestal height and core peaking. 2.5 is a
-        // reasonable middle ground that gives correct P_fus and Q for
-        // burning plasma scenarios (ITER, JET DTE2).
-        self.te0 = (te_avg_from_w * 2.5).max(0.01);
+        // Central Te with peaking factor ~2.0.
+        // This is consistent with the tanh-pedestal profile shape where
+        // Te_ped/Te0 ~ 0.35-0.45 and the volume-averaged Te is roughly
+        // Te0 / 2.0. Using a value consistent with the profile shapes
+        // ensures that Te(0) in the trace panel matches the profiles.
+        self.te0 = (te_avg_from_w * 2.0).max(0.01);
 
         // ── Beta values ──
         // <p> = 2 * ne [10²⁰ m⁻³] * Te [keV] * 1.602e4  (Pa)
@@ -601,29 +601,32 @@ impl TransportModel {
         let mu0 = 4.0 * std::f64::consts::PI * 1e-7;
         let b_pressure = bt * bt / (2.0 * mu0);
         self.beta_t = (p_avg / b_pressure * 100.0).max(0.0); // percent
-        // Zero β_N when Ip is below 10% of peak — prevents 1/Ip divergence
-        // at the very end of rampdown when programmed Ip approaches zero.
+        // β_N = beta_t * a * Bt / Ip. During rampdown, Ip drops faster
+        // than W_th decays, causing a 1/Ip divergence. To prevent this:
+        // 1. Fade β_N as Ip drops below 80% of peak (rampdown detection)
+        // 2. Zero β_N below 10% of peak (near-zero Ip)
+        // 3. Cap at the peak achieved during flat-top
         let ip_threshold = if self.ip_peak > 0.5 { self.ip_peak * 0.10 } else { 0.05 };
         let raw_beta_n = if ip > ip_threshold {
             self.beta_t * a * bt / ip  // %·m·T/MA
         } else {
             0.0
         };
-        // Clamp to the Troyon no-wall limit (βN ~ 4 with ideal wall).
-        // Cap raw value at the peak β_N achieved so far — prevents the
-        // 1/Ip divergence during Ip rampdown when stored energy persists.
-        // Rate-limited β_N: rises via rate limiter, never exceeds peak.
-        let clamped = raw_beta_n.min(4.0);
-        let max_rise = self.beta_n + 0.10;
+        // Fade β_N during rampdown: suppress the 1/Ip divergence smoothly
+        let ip_fade = if self.ip_peak > 0.5 {
+            ((ip / self.ip_peak - 0.10) / 0.70).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let clamped = (raw_beta_n * ip_fade).min(4.0);
+        // Rate limiter: max +0.01 per 5ms step = +2/s (slow enough to prevent spikes)
+        let max_rise = self.beta_n + 0.01;
         let new_beta_n = clamped.min(max_rise).max(0.0);
-        // Update peak tracker ONLY during normal operation (raw ≈ clamped).
-        // During rampdown, raw_beta_n spikes due to 1/Ip while clamped stays
-        // at the Troyon limit — don't let the peak tracker follow the spike.
-        let is_spiking = raw_beta_n > self.beta_n_peak * 1.2 && self.beta_n_peak > 0.3;
-        if new_beta_n > self.beta_n_peak && !is_spiking {
+        // Track peak only during flat-top (Ip near peak)
+        if new_beta_n > self.beta_n_peak && ip > self.ip_peak * 0.90 {
             self.beta_n_peak = new_beta_n;
         }
-        // Always cap at peak
+        // Cap at peak to prevent rampdown overshoot
         self.beta_n = new_beta_n.min(self.beta_n_peak);
     }
 }

@@ -228,25 +228,25 @@ export function computeFusion(snapshot: Snapshot, device: Device): FusionState {
   // isn't dominating the denominator) and smoothly ramping Q to zero when
   // Ip is below 50% of nominal (plasma is no longer in a meaningful state).
   // Q = P_fusion / P_external, with protections against rampdown spikes.
-  // During rampdown, heating drops before fusion power decays, causing Q to
-  // diverge. Solution: fade Q aggressively when programmed Ip drops below
-  // 90% of max (rampdown has begun) and cap at 10.
-  // Q = P_fusion / P_external.  To prevent rampdown spikes, cap Q at
-  // whatever value it had when external heating was at full power.
-  // Use a simple approach: Q denominator is always at least 30% of p_input,
-  // and Q fades to zero when Ip drops below 90%.
+  // During rampdown, external heating drops before fusion power decays
+  // (thermal inertia), causing Q = P_fus/P_ext to spike. Solution:
+  // 1. Floor the denominator at the total external heating (not alpha)
+  // 2. Fade Q smoothly as Ip drops below flat-top
+  // 3. Cap at 15 to prevent display artifacts
   const p_alpha = snapshot.p_alpha ?? 0
   const p_external = snapshot.p_input - p_alpha
+  const p_aux = snapshot.p_input - p_alpha - (snapshot.p_ohmic ?? 0)
   const ip_frac = device.ip_max > 0 ? snapshot.ip / device.ip_max : 0
   const prog_ip_frac = device.ip_max > 0 ? (snapshot.prog_ip ?? snapshot.ip) / device.ip_max : 0
-  // Fade starts at 95% Ip (very early rampdown detection), zero at 30%
-  const ip_fade = Math.min(Math.max((prog_ip_frac - 0.30) / 0.65, 0), 1.0)
+  // Fade starts early (98% Ip) and reaches zero at 30%
+  const ip_fade = Math.min(Math.max((prog_ip_frac - 0.30) / 0.68, 0), 1.0)
     * Math.min(Math.max((ip_frac - 0.20) / 0.60, 0), 1.0)
-  // Denominator: never let it drop below the external heating component
-  // at flat-top equivalent. Use max of actual p_external and a floor.
-  const denom = Math.max(p_external, p_alpha > 0.1 ? p_alpha * 0.5 : 0, 1.0)
+  // Denominator: use the larger of actual p_external or the auxiliary
+  // heating power. This prevents the denom from collapsing when heating
+  // is cut before stored energy decays.
+  const denom = Math.max(p_external, p_aux, 1.0)
   const q_plasma = denom > 1.0
-    ? Math.min(p_fus_MW / denom, 30) * ip_fade
+    ? Math.min(p_fus_MW / denom, 15) * ip_fade
     : 0
 
   return {

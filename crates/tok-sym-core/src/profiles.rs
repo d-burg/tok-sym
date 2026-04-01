@@ -60,10 +60,6 @@ pub struct Profiles {
     /// L↔H blend factor: 0.0 = fully L-mode shape, 1.0 = fully H-mode shape.
     /// Ramps smoothly during transitions to avoid profile discontinuities.
     pub blend: f64,
-    /// Smoothed W_th for energy normalization (MJ).
-    /// Prevents ELM-scale W_th drops from instantly propagating to core Te,
-    /// since the core acts as a thermal low-pass filter.
-    w_th_smooth: f64,
 }
 
 /// Evaluate tanh-pedestal profile at normalized radius ρ.
@@ -175,7 +171,6 @@ impl Profiles {
             te0_core_smooth: 2.0,
             ne0_core_smooth: 0.5,
             blend: 0.0,
-            w_th_smooth: 0.0,
         }
     }
 }
@@ -288,64 +283,15 @@ impl Profiles {
         sum / vol
     }
 
-    /// Normalize profile amplitudes so integrated stored energy matches 0D W_th.
-    ///
-    /// The 0D transport model determines W_th from power balance, but the
-    /// tanh-pedestal profiles may integrate to a different stored energy.
-    ///
-    /// Only the core Te is adjusted — the pedestal height is set by MHD
-    /// stability (peeling-ballooning) and should not be squeezed by global
-    /// energy constraints. The edge value is also left unchanged.
-    ///
-    /// The W_th input is smoothed internally using the energy confinement
-    /// time to prevent ELM crashes from instantly propagating to the core
-    /// profile. Fusion power is concentrated in the hot core, which acts
-    /// as a thermal low-pass filter — edge perturbations propagate inward
-    /// on the energy confinement timescale.
-    ///
-    /// `w_th_mj` is the 0D stored energy in MJ, `volume` is the plasma
-    /// volume in m³, `dt` is the timestep in seconds, `tau_e` is the
-    /// energy confinement time in seconds.
-    pub fn normalize_to_energy(&mut self, w_th_mj: f64, volume: f64, dt: f64, tau_e: f64) {
-        if w_th_mj < 0.001 || volume < 0.1 {
-            return;
-        }
-
-        // Smooth the W_th input to insulate core from fast ELM transients.
-        // The core temperature responds on the energy confinement timescale,
-        // not ELM crash timescales. This prevents P_fus from showing
-        // unphysical sharp drops synchronized with each ELM.
-        let tau_smooth = tau_e.max(0.05); // at least 50ms to avoid jitter
-        let alpha = (dt / tau_smooth).min(1.0);
-        self.w_th_smooth += (w_th_mj - self.w_th_smooth) * alpha;
-        let w_th_for_norm = self.w_th_smooth;
-
-        // Compute W from current profiles: W = 3 * ne * Te * V * 1.602e-2 (MJ)
-        let n = 50;
-        let mut w_prof = 0.0;
-        let mut vol_sum = 0.0;
-        for i in 0..n {
-            let rho = (i as f64 + 0.5) / n as f64;
-            let dv = 2.0 * rho;
-            w_prof += 3.0 * self.ne(rho) * self.te(rho) * dv;
-            vol_sum += dv;
-        }
-        w_prof = w_prof / vol_sum * volume * 1.602e-2; // MJ
-
-        if w_prof < 0.001 {
-            return;
-        }
-
-        let ratio = w_th_for_norm / w_prof;
-        // Only apply moderate corrections (0.6x to 1.8x).
-        let scale = ratio.clamp(0.6, 1.8);
-
-        // Scale only the core Te — the pedestal and edge are MHD-limited
-        // and should be preserved. This adjusts the temperature peaking
-        // to match the 0D energy content without distorting the pedestal.
-        self.te_params.core *= scale;
-        // Don't touch te_params.ped or te_params.edge
-    }
+    // Profile energy normalization was removed. The 0D transport model
+    // and profile parameterization use different approximations, leading
+    // to ~20-30% stored energy mismatch (W_profiles vs W_0D). This is an
+    // acceptable limitation of the 0D approach. Attempts to force energy
+    // consistency by rescaling Te_core caused the profile Te(0) to diverge
+    // from the trace Te0, and produced unphysical Te swells during L-H
+    // and H-L transitions. The profile shapes are now set purely by the
+    // 0D-derived Te0/ne0 and the pedestal scaling, giving consistent
+    // values between the trace panel and profile panel.
 
     /// Compute internal inductance l_i from Te profile shape.
     ///

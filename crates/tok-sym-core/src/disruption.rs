@@ -139,7 +139,12 @@ impl DisruptionModel {
             * (1.0 - self.risk_radiation.powi(3))
             * (1.0 - self.risk_locked_mode);
 
-        self.risk = self.risk.clamp(0.0, 1.0);
+        // Floor at ~1% during normal operation — real tokamak discharges
+        // always carry a small baseline disruption probability from
+        // unmodeled MHD events, wall interactions, and impurity influx.
+        // Uses the locked mode RNG for mild stochasticity (0.5-1.5%).
+        let floor = 0.005 + self.risk_locked_mode.min(0.01);
+        self.risk = self.risk.max(floor).clamp(0.0, 1.0);
     }
 
     /// Check if a disruption should be triggered this timestep.

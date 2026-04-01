@@ -611,7 +611,15 @@ impl Simulation {
                 self.smoothed_p_rad_frac,
                 self.actual_ip,
             );
-            if !in_rampdown {
+            // During rampdown, suppress the risk display — transient spikes
+            // in radiation fraction and beta are normal controlled termination
+            // physics, not disruption precursors. Fade risk toward the baseline
+            // floor as Ip drops.
+            if in_rampdown {
+                let ramp_frac = (prog.ip / self.peak_prog_ip).clamp(0.0, 1.0);
+                self.disruption.risk *= ramp_frac;
+                self.disruption.risk = self.disruption.risk.max(0.005);
+            } else {
                 self.disruption.check_trigger(dt);
             }
         }
@@ -638,10 +646,6 @@ impl Simulation {
             prog.delta,
             self.transport.tau_e,
         );
-
-        // ── Normalize profiles to 0D stored energy ──
-        self.profiles
-            .normalize_to_energy(self.transport.w_th, self.device.volume, dt, self.transport.tau_e);
 
         // ── Update l_i from Te profile shape ──
         // j ∝ Te^1.5 (Spitzer), so l_i tracks Te profile peaking.

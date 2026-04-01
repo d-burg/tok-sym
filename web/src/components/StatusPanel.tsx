@@ -365,20 +365,22 @@ function QDisplay({ fusion }: { fusion: FusionState | null }) {
     : q >= 1 ? 'border-cyan-500/40 bg-cyan-500/5'
     : 'border-gray-700/50 bg-gray-800/50'
 
-  // Format P_fus — always show to prevent layout jumps
+  // Format P_fus with fixed width: 4 digits left of decimal + unit
+  // Uses fixed-width formatting to prevent box width changes
   const pFusStr = pFus > 0.001
-    ? (pFus < 1 ? (pFus * 1000).toFixed(0) + ' kW' : pFus.toFixed(1) + ' MW')
-    : '—'
+    ? (pFus < 1
+        ? (pFus * 1000).toFixed(0).padStart(4, '\u2007') + ' kW'  // figure space padding
+        : pFus.toFixed(1).padStart(6, '\u2007') + ' MW')
+    : '\u2007\u2007\u2007— MW'
 
   return (
-    <div className={`rounded border px-2.5 py-1.5 text-center min-w-[72px] shrink-0 ${borderColor}`}>
+    <div className={`rounded border px-2.5 py-1.5 text-center min-w-[84px] shrink-0 ${borderColor}`}>
       <div className="text-[10px] text-gray-500 leading-tight">Q<sub>plasma</sub></div>
       <div className={`text-lg font-bold tabular-nums leading-tight ${qColor}`}>
         {formatQ(q)}
       </div>
-      <div className="text-[10px] text-gray-600 leading-none">{fuelType}</div>
-      <div className="text-[9px] text-gray-600 leading-none mt-0.5 tabular-nums">
-        P<sub>fus</sub> {pFusStr}
+      <div className="text-[9px] text-gray-500 leading-none mt-0.5 tabular-nums whitespace-nowrap">
+        <span className="text-gray-500">P<sub>fus</sub></span> {pFusStr}
       </div>
     </div>
   )
