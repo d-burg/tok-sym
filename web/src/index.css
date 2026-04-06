@@ -68,11 +68,29 @@ body {
   --text-secondary: #71717a;
 }
 
-/* ---------- Typography: sans-serif ---------- */
+/* ---------- Typography: sans-serif with extreme weight contrast ---------- */
 [data-theme="modern"] body {
   font-family: 'Inter', 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-weight: 350;
   background-color: var(--bg-primary);
   letter-spacing: 0.02em;
+  color-scheme: dark;
+  /* Mesh gradient + grid on all pages */
+  background-image:
+    radial-gradient(ellipse 60% 50% at 15% 10%, rgba(34, 211, 238, 0.03) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 85% 90%, rgba(245, 158, 11, 0.015) 0%, transparent 70%),
+    repeating-linear-gradient(0deg, transparent, transparent 59px, rgba(255, 255, 255, 0.025) 59px, rgba(255, 255, 255, 0.025) 60px),
+    repeating-linear-gradient(90deg, transparent, transparent 59px, rgba(255, 255, 255, 0.025) 59px, rgba(255, 255, 255, 0.025) 60px);
+}
+
+/* Section headers / panel titles — heavy weight */
+[data-theme="modern"] .font-bold {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+[data-theme="modern"] .font-semibold {
+  font-weight: 700;
+  letter-spacing: -0.005em;
 }
 
 [data-theme="modern"] .font-mono {
@@ -81,20 +99,27 @@ body {
 }
 [data-theme="modern"] .tabular-nums {
   font-variant-numeric: tabular-nums;
+  font-weight: 450;
 }
 
-/* ---------- Page background ---------- */
+/* ---------- Page background override ---------- */
 [data-theme="modern"] .bg-\[\#0a0e17\] {
   background-color: var(--bg-primary);
 }
 
 /* ── PANEL CARDS ─────────────────────────────────────────────── */
 [data-theme="modern"] .bg-gray-900.border.border-gray-700.rounded-lg {
-  background: var(--bg-panel);
+  background: rgba(12, 12, 15, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: 2px;
   box-shadow: none;
   position: relative;
+  transition: border-color 0.2s ease;
+}
+[data-theme="modern"] .bg-gray-900.border.border-gray-700.rounded-lg:hover {
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 /* Corner accent brackets — subtle white */
@@ -231,7 +256,8 @@ body {
   letter-spacing: 0.04em;
 }
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-800:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e4e4e7;
 }
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-amber-600,
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-600 {
@@ -402,6 +428,37 @@ body {
 }
 [data-theme="modern"] .focus\:border-cyan-500:focus {
   border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── FOCUS-VISIBLE (keyboard accessibility) ─────────────────── */
+[data-theme="modern"] input:focus-visible,
+[data-theme="modern"] select:focus-visible,
+[data-theme="modern"] button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35);
+}
+
+/* ── PAGE-LOAD STAGGER ANIMATION ────────────────────────────── */
+@keyframes modernFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+[data-theme="modern"] .stagger-1 { animation: modernFadeIn 0.35s ease-out 0.05s both; }
+[data-theme="modern"] .stagger-2 { animation: modernFadeIn 0.35s ease-out 0.12s both; }
+[data-theme="modern"] .stagger-3 { animation: modernFadeIn 0.35s ease-out 0.19s both; }
+[data-theme="modern"] .stagger-4 { animation: modernFadeIn 0.35s ease-out 0.26s both; }
+
+/* ── REDUCED MOTION ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="modern"] .stagger-1,
+  [data-theme="modern"] .stagger-2,
+  [data-theme="modern"] .stagger-3,
+  [data-theme="modern"] .stagger-4 {
+    animation: none;
+  }
+  [data-theme="modern"] * {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════

@@ -135,7 +135,7 @@ export default function DeviceSelect() {
               onClick={() => navigate(`/program/${d.id}`)}
               className="group bg-gray-900 border border-gray-700 rounded-lg p-6 text-left
                          hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/10
-                         transition-all duration-200 cursor-pointer
+                         hover:scale-[1.01] transition-all duration-200 cursor-pointer
                          flex flex-col"
             >
               {/* Cross-section silhouette — fixed height */}

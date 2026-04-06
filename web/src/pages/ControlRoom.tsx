@@ -276,12 +276,12 @@ export default function ControlRoom() {
       <div className="flex-1 overflow-x-auto">
       <div className="min-w-[768px] h-full grid grid-cols-[1fr_1.5fr_1fr] grid-rows-[1.1fr_1fr] gap-2 p-2 min-h-0">
         {/* Top-left: Equilibrium cross-section (single cell) */}
-        <div data-tutorial="equilibrium" className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+        <div data-tutorial="equilibrium" className="stagger-1 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
           <EquilibriumCanvas snapshot={displaySnapshot} wallJson={wallJson} limiterPoints={limiterPoints} />
         </div>
 
         {/* Top row, cols 2-3: Unified trace panel */}
-        <div data-tutorial="traces" className="col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+        <div data-tutorial="traces" className="stagger-2 col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
           <UnifiedTracePanel
             history={history}
             programJson={programJson}
@@ -295,7 +295,7 @@ export default function ControlRoom() {
         </div>
 
         {/* Bottom row, cols 1-2: Status panel (extends under equilibrium) */}
-        <div data-tutorial="status" className="col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+        <div data-tutorial="status" className="stagger-3 col-span-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
           <StatusPanel
             snapshot={displaySnapshot}
             finished={finished}
@@ -308,7 +308,7 @@ export default function ControlRoom() {
         </div>
 
         {/* Bottom-right: 3D port view */}
-        <div data-tutorial="portview" className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+        <div data-tutorial="portview" className="stagger-4 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
           <PortView
             snapshot={plasmaSnapshot}
             limiterPoints={limiterPoints}
