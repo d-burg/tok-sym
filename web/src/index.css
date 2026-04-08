@@ -56,43 +56,45 @@ body {
 
 /* ---------- Colour palette ---------- */
 [data-theme="modern"] {
-  --bg-primary: #08080a;
-  --bg-panel: #0c0c0f;
-  --bg-card: #131316;
-  --border: rgba(255, 255, 255, 0.10);
-  --border-bright: rgba(255, 255, 255, 0.22);
-  --border-glow: rgba(255, 255, 255, 0.03);
-  --accent: #22d3ee;
-  --accent-warm: #f59e0b;
-  --text-primary: #d4d4d8;
-  --text-secondary: #71717a;
+  --bg-primary: #06091a;
+  --bg-panel: #0c1024;
+  --bg-card: #111530;
+  --border: rgba(34, 211, 238, 0.08);
+  --border-bright: rgba(34, 211, 238, 0.20);
+  --border-glow: rgba(34, 211, 238, 0.03);
+  --accent: #00d4ff;
+  --accent-warm: #ffd700;
+  --danger: #ff2e63;
+  --text-primary: #e0e8ff;
+  --text-secondary: #6b7db3;
 }
 
-/* ---------- Typography: sans-serif with extreme weight contrast ---------- */
+/* ---------- Typography: Inter with extreme weight contrast ---------- */
 [data-theme="modern"] body {
   font-family: 'Inter', 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-weight: 350;
   background-color: var(--bg-primary);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   color-scheme: dark;
   /* Mesh gradient + grid on all pages */
   background-image:
-    radial-gradient(ellipse 60% 50% at 15% 10%, rgba(34, 211, 238, 0.03) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 40% at 85% 90%, rgba(245, 158, 11, 0.015) 0%, transparent 70%),
-    repeating-linear-gradient(0deg, transparent, transparent 59px, rgba(255, 255, 255, 0.025) 59px, rgba(255, 255, 255, 0.025) 60px),
-    repeating-linear-gradient(90deg, transparent, transparent 59px, rgba(255, 255, 255, 0.025) 59px, rgba(255, 255, 255, 0.025) 60px);
+    radial-gradient(ellipse 60% 50% at 15% 10%, rgba(0, 212, 255, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 85% 90%, rgba(255, 215, 0, 0.02) 0%, transparent 70%),
+    repeating-linear-gradient(0deg, transparent, transparent 59px, rgba(0, 212, 255, 0.02) 59px, rgba(0, 212, 255, 0.02) 60px),
+    repeating-linear-gradient(90deg, transparent, transparent 59px, rgba(0, 212, 255, 0.02) 59px, rgba(0, 212, 255, 0.02) 60px);
 }
 
 /* Section headers / panel titles — heavy weight */
 [data-theme="modern"] .font-bold {
-  font-weight: 800;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 [data-theme="modern"] .font-semibold {
-  font-weight: 700;
-  letter-spacing: -0.005em;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
+/* Data readouts */
 [data-theme="modern"] .font-mono {
   font-family: 'Inter', 'SF Pro Display', system-ui, sans-serif;
   letter-spacing: 0.025em;
@@ -109,17 +111,18 @@ body {
 
 /* ── PANEL CARDS ─────────────────────────────────────────────── */
 [data-theme="modern"] .bg-gray-900.border.border-gray-700.rounded-lg {
-  background: rgba(12, 12, 15, 0.85);
+  background: rgba(12, 16, 36, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: 2px;
-  box-shadow: none;
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.02);
   position: relative;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 [data-theme="modern"] .bg-gray-900.border.border-gray-700.rounded-lg:hover {
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: var(--border-bright);
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.05);
 }
 
 /* Corner accent brackets — subtle white */
@@ -138,11 +141,11 @@ body {
     linear-gradient(to left, var(--border-bright), transparent 20px) no-repeat top right / 20px 1px,
     linear-gradient(to bottom, var(--border-bright), transparent 20px) no-repeat top right / 1px 20px,
     /* ── bottom-left ── */
-    linear-gradient(to right, rgba(255, 255, 255, 0.12), transparent 20px) no-repeat bottom left / 20px 1px,
-    linear-gradient(to top, rgba(255, 255, 255, 0.12), transparent 20px) no-repeat bottom left / 1px 20px,
+    linear-gradient(to right, rgba(0, 212, 255, 0.10), transparent 20px) no-repeat bottom left / 20px 1px,
+    linear-gradient(to top, rgba(0, 212, 255, 0.10), transparent 20px) no-repeat bottom left / 1px 20px,
     /* ── bottom-right ── */
-    linear-gradient(to left, rgba(255, 255, 255, 0.12), transparent 20px) no-repeat bottom right / 20px 1px,
-    linear-gradient(to top, rgba(255, 255, 255, 0.12), transparent 20px) no-repeat bottom right / 1px 20px;
+    linear-gradient(to left, rgba(0, 212, 255, 0.10), transparent 20px) no-repeat bottom right / 20px 1px,
+    linear-gradient(to top, rgba(0, 212, 255, 0.10), transparent 20px) no-repeat bottom right / 1px 20px;
 }
 
 /* Subtle scan-line overlay — white tint */
@@ -157,8 +160,8 @@ body {
     0deg,
     transparent,
     transparent 3px,
-    rgba(255, 255, 255, 0.008) 3px,
-    rgba(255, 255, 255, 0.008) 4px
+    rgba(0, 212, 255, 0.008) 3px,
+    rgba(0, 212, 255, 0.008) 4px
   );
 }
 
@@ -170,39 +173,39 @@ body {
 
 /* ── TOP BAR ─────────────────────────────────────────────────── */
 [data-theme="modern"] .border-b.border-gray-800 {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(10, 10, 12, 0.95);
+  border-color: rgba(0, 212, 255, 0.06);
+  background: rgba(6, 9, 26, 0.95);
   box-shadow: none;
 }
 
 /* ── SECTION DIVIDERS inside panels ──────────────────────────── */
 [data-theme="modern"] .border-t.border-gray-800 {
-  border-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(0, 212, 255, 0.06);
 }
 [data-theme="modern"] .border-gray-800\/50 {
-  border-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(0, 212, 255, 0.04);
 }
 
 /* ── BUTTONS ─────────────────────────────────────────────────── */
-/* Start / primary action — keep cyan but more muted */
+/* Start / primary action — electric cyan */
 [data-theme="modern"] button.bg-cyan-600 {
-  background: rgba(8, 145, 178, 0.6);
-  border: 1px solid rgba(34, 211, 238, 0.3);
-  box-shadow: none;
+  background: rgba(0, 160, 200, 0.5);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.1);
   border-radius: 2px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
 }
 [data-theme="modern"] button.bg-cyan-600:hover {
-  background: rgba(8, 145, 178, 0.8);
-  box-shadow: 0 0 12px rgba(34, 211, 238, 0.15);
+  background: rgba(0, 160, 200, 0.7);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.25);
 }
 
-/* Pause */
+/* Pause — gold */
 [data-theme="modern"] button.bg-amber-600 {
-  background: rgba(180, 83, 9, 0.5);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgba(180, 150, 0, 0.4);
+  border: 1px solid rgba(255, 215, 0, 0.3);
   box-shadow: none;
   border-radius: 2px;
   text-transform: uppercase;
@@ -211,15 +214,15 @@ body {
 
 /* Reset / secondary */
 [data-theme="modern"] button.bg-gray-700 {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid rgba(0, 212, 255, 0.10);
   border-radius: 2px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 [data-theme="modern"] button.bg-gray-700:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 212, 255, 0.08);
+  border-color: rgba(0, 212, 255, 0.18);
   box-shadow: none;
 }
 
@@ -235,29 +238,97 @@ body {
 
 /* ── SELECT DROPDOWNS ────────────────────────────────────────── */
 [data-theme="modern"] select.bg-gray-800 {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid var(--border);
   border-radius: 2px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+
+/* ── RANGE SLIDERS ──────────────────────────────────────────── */
+/* Custom track + hollow thumb for cyberpunk aesthetic */
+[data-theme="modern"] input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 20px;
+}
+/* Track — thin line with cyan tint */
+[data-theme="modern"] input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 212, 255, 0.25),
+    rgba(0, 212, 255, 0.10)
+  );
+  border-radius: 1px;
+}
+[data-theme="modern"] input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 212, 255, 0.25),
+    rgba(0, 212, 255, 0.10)
+  );
+  border-radius: 1px;
+  border: none;
+}
+/* Thumb — hollow circle with cyan border */
+[data-theme="modern"] input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  border: 2px solid rgba(0, 212, 255, 0.5);
+  margin-top: -5px; /* center on track */
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-theme="modern"] input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  border: 2px solid rgba(0, 212, 255, 0.5);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+/* Hover — brighten border + glow */
+[data-theme="modern"] input[type="range"]:hover::-webkit-slider-thumb {
+  border-color: rgba(0, 212, 255, 0.8);
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+}
+[data-theme="modern"] input[type="range"]:hover::-moz-range-thumb {
+  border-color: rgba(0, 212, 255, 0.8);
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+}
+/* Active — solid fill when dragging */
+[data-theme="modern"] input[type="range"]:active::-webkit-slider-thumb {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+[data-theme="modern"] input[type="range"]:active::-moz-range-thumb {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
 }
 
 /* ── BUTTON GROUPS (presets, speed) ──────────────────────────── */
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--border);
   border-radius: 2px;
   overflow: hidden;
 }
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-800 {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(0, 212, 255, 0.03);
   border: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(0, 212, 255, 0.06);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-800:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e4e4e7;
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--text-primary);
 }
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-amber-600,
 [data-theme="modern"] .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-600 {
@@ -274,8 +345,8 @@ body {
 
 /* ── POWER BARS (StatusPanel) ────────────────────────────────── */
 [data-theme="modern"] .bg-gray-800.rounded-full {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid rgba(0, 212, 255, 0.05);
   border-radius: 2px;
 }
 [data-theme="modern"] .bg-gray-800.rounded-full .rounded-full {
@@ -289,29 +360,29 @@ body {
 
 /* ── SETTINGS DROPDOWN ───────────────────────────────────────── */
 [data-theme="modern"] .settings-panel {
-  background: rgba(14, 14, 16, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 16, 36, 0.97);
+  border: 1px solid var(--border-bright);
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
   border-radius: 2px;
   backdrop-filter: blur(16px);
 }
 [data-theme="modern"] .settings-panel .flex.rounded.overflow-hidden.border.border-gray-700 {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--border);
 }
 [data-theme="modern"] .settings-btn:hover {
   text-shadow: none;
-  color: #e4e4e7;
+  color: var(--text-primary);
 }
 
 /* ── Q DISPLAY / NEUTRON CARDS ───────────────────────────────── */
 [data-theme="modern"] .border-gray-700\/50 {
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(0, 212, 255, 0.06);
 }
 [data-theme="modern"] .bg-gray-800\/30 {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 212, 255, 0.02);
 }
 [data-theme="modern"] .bg-gray-800\/50 {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 212, 255, 0.04);
 }
 
 /* Q glow states — keep color accents for data, but subdued */
@@ -326,16 +397,16 @@ body {
 
 /* ── INFO POPUP ──────────────────────────────────────────────── */
 [data-theme="modern"] .bg-gray-900.border-gray-700 {
-  background: rgba(14, 14, 16, 0.97);
-  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(12, 16, 36, 0.97);
+  border-color: var(--border);
 }
 
 /* ── TEXT REFINEMENTS ────────────────────────────────────────── */
 [data-theme="modern"] .text-gray-500 {
-  color: #71717a;
+  color: var(--text-secondary);
 }
 [data-theme="modern"] .text-gray-600 {
-  color: #52525b;
+  color: #4a5a8a;
 }
 
 /* Wider tracking on small labels */
@@ -346,28 +417,29 @@ body {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-/* Don't uppercase info popup body text — it contains physics descriptions */
+/* Don't uppercase info popup body text or unit labels */
 [data-theme="modern"] .info-popup-content .text-\[10px\],
-[data-theme="modern"] .info-popup-content .text-\[9px\] {
+[data-theme="modern"] .info-popup-content .text-\[9px\],
+[data-theme="modern"] .unit-label {
   text-transform: none;
 }
 [data-theme="modern"] .text-\[9px\] {
   letter-spacing: 0.04em;
 }
 
-/* Mode badge refinement — monochrome */
+/* Mode badge refinement */
 [data-theme="modern"] .bg-cyan-900 {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.15);
 }
 [data-theme="modern"] .bg-gray-800.text-gray-300 {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
 }
 [data-theme="modern"] .bg-red-900 {
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  border: 1px solid rgba(255, 46, 99, 0.25);
 }
 
-/* ── TOP ACCENT LINE — subtle white ──────────────────────────── */
+/* ── TOP ACCENT LINE — cyan glow ─────────────────────────────── */
 [data-theme="modern"]::after {
   content: '';
   position: fixed;
@@ -376,9 +448,9 @@ body {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.12) 15%,
-    rgba(255, 255, 255, 0.25) 50%,
-    rgba(255, 255, 255, 0.12) 85%,
+    rgba(0, 212, 255, 0.15) 15%,
+    rgba(0, 212, 255, 0.35) 50%,
+    rgba(0, 212, 255, 0.15) 85%,
     transparent 100%
   );
   z-index: 9999;
@@ -394,9 +466,9 @@ body {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.06) 20%,
-    rgba(255, 255, 255, 0.12) 50%,
-    rgba(255, 255, 255, 0.06) 80%,
+    rgba(0, 212, 255, 0.08) 20%,
+    rgba(0, 212, 255, 0.15) 50%,
+    rgba(0, 212, 255, 0.08) 80%,
     transparent 100%
   );
   z-index: 9999;
@@ -405,29 +477,29 @@ body {
 
 /* ── DISRUPTION RISK BAR ─────────────────────────────────────── */
 [data-theme="modern"] .w-24.h-2\.5.bg-gray-800.rounded-full {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid rgba(0, 212, 255, 0.05);
   border-radius: 2px;
 }
 
-/* ── CYAN ACCENT OVERRIDES — mute Tailwind cyan for monochrome ── */
+/* ── CYAN ACCENT OVERRIDES — let cyan shine through ─────────── */
 [data-theme="modern"] .text-cyan-400 {
-  color: #a1a1aa;
+  color: var(--accent);
 }
 [data-theme="modern"] .border-cyan-600 {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(0, 212, 255, 0.25);
 }
 [data-theme="modern"] .hover\:border-cyan-600:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(0, 212, 255, 0.4);
 }
 [data-theme="modern"] .hover\:border-cyan-500:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(0, 212, 255, 0.4);
 }
 [data-theme="modern"] .hover\:shadow-cyan-500\/10:hover {
-  box-shadow: none;
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.1);
 }
 [data-theme="modern"] .focus\:border-cyan-500:focus {
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(0, 212, 255, 0.4);
 }
 
 /* ── FOCUS-VISIBLE (keyboard accessibility) ─────────────────── */
@@ -435,7 +507,7 @@ body {
 [data-theme="modern"] select:focus-visible,
 [data-theme="modern"] button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.35);
 }
 
 /* ── PAGE-LOAD STAGGER ANIMATION ────────────────────────────── */
@@ -447,13 +519,48 @@ body {
 [data-theme="modern"] .stagger-2 { animation: modernFadeIn 0.35s ease-out 0.12s both; }
 [data-theme="modern"] .stagger-3 { animation: modernFadeIn 0.35s ease-out 0.19s both; }
 [data-theme="modern"] .stagger-4 { animation: modernFadeIn 0.35s ease-out 0.26s both; }
+[data-theme="modern"] .stagger-5 { animation: modernFadeIn 0.35s ease-out 0.33s both; }
+[data-theme="modern"] .stagger-6 { animation: modernFadeIn 0.35s ease-out 0.40s both; }
+
+/* ── PAGE TRANSITION ────────────────────────────────────────── */
+[data-theme="modern"] .page-enter {
+  animation: pageFadeIn 0.25s ease-out both;
+}
+@keyframes pageFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── HERO PLASMA GLOW ANIMATION ─────────────────────────────── */
+@keyframes plasmaGlow {
+  0%, 100% {
+    background-position: 0% 50%, 100% 50%;
+    opacity: 0.6;
+  }
+  50% {
+    background-position: 30% 40%, 70% 60%;
+    opacity: 1;
+  }
+}
+[data-theme="modern"] .hero-glow {
+  background-image:
+    radial-gradient(ellipse 40% 50% at 40% 50%, rgba(0, 212, 255, 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 35% 45% at 60% 50%, rgba(255, 215, 0, 0.06) 0%, transparent 70%);
+  animation: plasmaGlow 8s ease-in-out infinite;
+}
 
 /* ── REDUCED MOTION ─────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   [data-theme="modern"] .stagger-1,
   [data-theme="modern"] .stagger-2,
   [data-theme="modern"] .stagger-3,
-  [data-theme="modern"] .stagger-4 {
+  [data-theme="modern"] .stagger-4,
+  [data-theme="modern"] .stagger-5,
+  [data-theme="modern"] .stagger-6,
+  [data-theme="modern"] .page-enter {
+    animation: none;
+  }
+  [data-theme="modern"] .hero-glow {
     animation: none;
   }
   [data-theme="modern"] * {

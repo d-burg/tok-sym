@@ -636,7 +636,7 @@ function Param({
       <span className="text-gray-500">{label}</span>
       <span className={`${color} tabular-nums`}>
         <span className="inline-block min-w-[3.5em] text-right">{formatted}</span>
-        <span className="text-gray-600 ml-0.5 text-[10px] inline-block min-w-[2.5em]">{unit}</span>
+        <span className="text-gray-600 ml-0.5 text-[10px] inline-block min-w-[2.5em] unit-label">{unit}</span>
       </span>
     </div>
   )
@@ -656,7 +656,7 @@ function PowerBar({
   const frac = total > 0 ? Math.min(value / total, 1) : 0
   return (
     <div className="flex items-center gap-1.5 leading-none py-0.5">
-      <span className="text-[10px] text-gray-500 w-10 text-right shrink-0">{label}</span>
+      <span className="text-[10px] text-gray-500 w-10 text-right shrink-0 unit-label">{label}</span>
       <div className="flex-1 h-2.5 bg-gray-800 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-200"

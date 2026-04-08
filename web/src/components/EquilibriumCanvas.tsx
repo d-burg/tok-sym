@@ -173,11 +173,17 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     buildWallPath()
     ctx.stroke()
 
-    // --- Draw magnetic axis (only when plasma is present) ---
-    // Compute axis from centroid of the innermost flux surface so it
-    // tracks the actual rendered contours during dynamic shape changes.
+    // --- Draw magnetic axis + X-points (clipped to wall interior) ---
+    // Clip to the wall polygon so markers don't appear outside the limiter
+    // during ramp-up when equilibrium geometry is still evolving.
     const hasPlasma = snapshot && snapshot.ip > 0.05
+    ctx.save()
+    buildWallPath()
+    ctx.clip()
+
     if (hasPlasma && snapshot.axis_r > 0) {
+      // Compute axis from centroid of the innermost flux surface so it
+      // tracks the actual rendered contours during dynamic shape changes.
       let axisR = snapshot.axis_r
       let axisZ = snapshot.axis_z
       const innermost = snapshot.flux_surfaces?.[0]
@@ -210,7 +216,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       ctx.globalAlpha = 1
     }
 
-    // --- Draw X-point(s) ---
+    // --- X-point(s) ---
     const drawXMark = (r: number, z: number) => {
       const xp = toX(r)
       const yp = toY(z)
@@ -230,6 +236,8 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     if (hasPlasma && (snapshot.xpoint_upper_r ?? 0) > 0) {
       drawXMark(snapshot.xpoint_upper_r, snapshot.xpoint_upper_z)
     }
+
+    ctx.restore() // remove wall clip
 
     // --- R / Z Axes ---
     // Pick a "nice" tick step that avoids overcrowding at small panel sizes.

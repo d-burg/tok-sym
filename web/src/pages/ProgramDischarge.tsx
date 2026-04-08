@@ -144,7 +144,7 @@ export default function ProgramDischarge() {
     selected === 'hmode' ? '#22d3ee' : selected === 'lmode' ? '#fbbf24' : '#ef4444'
 
   return (
-    <div className="min-h-screen flex flex-col items-center p-8 max-w-5xl mx-auto">
+    <div className="page-enter min-h-screen flex flex-col items-center p-8 max-w-5xl mx-auto">
       {/* Back link */}
       <button
         onClick={() => navigate('/')}

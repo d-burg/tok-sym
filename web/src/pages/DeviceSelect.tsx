@@ -114,113 +114,115 @@ export default function DeviceSelect() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8">
-      {/* Header */}
-      <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold tracking-tight mb-2 text-white">
-          fusionsimulator<span className="text-gray-500">.io</span>
+    <div className="page-enter min-h-screen flex flex-col">
+      {/* ── Hero Section ── */}
+      <div className="relative flex flex-col items-center justify-center py-24 px-8 overflow-hidden">
+        {/* Animated plasma glow background */}
+        <div className="hero-glow absolute inset-0 pointer-events-none" />
+
+        <h1 className="stagger-1 relative text-5xl sm:text-6xl font-bold tracking-tight mb-3 text-white z-10">
+          fusionsimulator<span className="text-cyan-400">.io</span>
         </h1>
-        <p className="text-gray-400 text-lg">
+        <p className="stagger-2 relative text-gray-400 text-lg sm:text-xl font-light tracking-wide z-10">
           Real-time tokamak discharge simulator
         </p>
+        <p className="stagger-2 relative text-gray-600 text-xs mt-3 tracking-widest uppercase z-10">
+          0D transport &middot; MHD equilibrium &middot; ELM dynamics &middot; Fusion diagnostics
+        </p>
       </div>
 
-      {/* Device cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl w-full">
-        {devices.map((d) => {
-          const meta = DEVICE_META[d.id] ?? { location: '', desc: '' }
-          return (
-            <button
-              key={d.id}
-              onClick={() => navigate(`/program/${d.id}`)}
-              className="group bg-gray-900 border border-gray-700 rounded-lg p-6 text-left
-                         hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/10
-                         hover:scale-[1.01] transition-all duration-200 cursor-pointer
-                         flex flex-col"
-            >
-              {/* Cross-section silhouette — fixed height */}
-              <div className="h-32">
-                <DeviceSilhouette device={d} />
-              </div>
-
-              {/* Machine name */}
-              <div className="flex items-baseline justify-between mb-1 mt-3">
-                <h2 className="text-2xl font-bold text-white group-hover:text-cyan-400 transition-colors">
-                  {d.name}
-                </h2>
-                <div className="text-right shrink-0 ml-2">
-                  <div className="text-xs text-gray-500">{meta.location}</div>
-                  {meta.status && (
-                    <div className="text-[10px] text-gray-600 italic">{meta.status}</div>
-                  )}
+      {/* ── Device Cards ── */}
+      <div className="flex-1 flex flex-col items-center px-8 pb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl w-full">
+          {devices.map((d, i) => {
+            const meta = DEVICE_META[d.id] ?? { location: '', desc: '' }
+            return (
+              <button
+                key={d.id}
+                onClick={() => navigate(`/program/${d.id}`)}
+                className={`stagger-${i + 3} group bg-gray-900 border border-gray-700 rounded-lg p-6 text-left
+                           hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/10
+                           hover:scale-[1.01] transition-all duration-200 cursor-pointer
+                           flex flex-col`}
+              >
+                {/* Cross-section silhouette */}
+                <div className="h-40">
+                  <DeviceSilhouette device={d} />
                 </div>
-              </div>
 
-              {/* Stats row */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400 mb-3 font-mono">
-                <span>R₀ = {d.r0.toFixed(2)} m</span>
-                <span>a = {d.a.toFixed(2)} m</span>
-                <span>Iₚ ≤ {d.ip_max} MA</span>
-                <span>Bₜ ≤ {d.bt_max} T</span>
-                <span>κ = {d.kappa.toFixed(1)}</span>
-                <span>V = {d.volume} m³</span>
-              </div>
+                {/* Machine name */}
+                <div className="flex items-baseline justify-between mb-1 mt-3">
+                  <h2 className="text-2xl font-bold text-white group-hover:text-cyan-400 transition-colors">
+                    {d.name}
+                  </h2>
+                  <div className="text-right shrink-0 ml-2">
+                    <div className="text-xs text-gray-500">{meta.location}</div>
+                    {meta.status && (
+                      <div className="text-[10px] text-gray-600 italic">{meta.status}</div>
+                    )}
+                  </div>
+                </div>
 
-              {/* Description — flex-grow pushes the arrow to the bottom */}
-              <p className="text-gray-500 text-sm leading-relaxed flex-grow">
-                {meta.desc}
-              </p>
+                {/* Stats row */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400 mb-3 font-mono tabular-nums">
+                  <span>R₀ = {d.r0.toFixed(2)} m</span>
+                  <span>a = {d.a.toFixed(2)} m</span>
+                  <span>Iₚ ≤ {d.ip_max} MA</span>
+                  <span>Bₜ ≤ {d.bt_max} T</span>
+                </div>
 
-              {/* Arrow — always at bottom of card */}
-              <div className="mt-4 text-right text-gray-600 group-hover:text-cyan-400 transition-colors">
-                Select →
-              </div>
-            </button>
-          )
-        })}
+                {/* Description */}
+                <p className="text-gray-500 text-sm leading-relaxed flex-grow">
+                  {meta.desc}
+                </p>
+
+                {/* Arrow */}
+                <div className="mt-4 text-right text-gray-600 group-hover:text-cyan-400 transition-colors text-sm">
+                  Select →
+                </div>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Footer */}
+        <footer className="mt-16 max-w-3xl w-full text-center space-y-4">
+          <div className="px-5 py-3 rounded-lg border border-gray-800 bg-gray-900/50 text-gray-500 text-[11px] leading-relaxed">
+            <strong className="text-gray-400">Disclaimer:</strong> This simulator uses zero-dimensional
+            scaling laws and analytic approximations (0D power balance, IPB98(y,2) confinement scaling,
+            Cerfon-Freidberg equilibrium). Results are designed for{' '}
+            <em>qualitative educational use</em> and should not be interpreted as engineering
+            predictions or used for reactor design.
+          </div>
+
+          <div className="flex items-center justify-center gap-3 text-gray-600 text-xs">
+            <span>Open-source · Educational</span>
+            <span className="text-gray-700">·</span>
+            <Link
+              to="/bibliography"
+              className="text-cyan-600 hover:text-cyan-400 transition-colors"
+            >
+              Physics Bibliography
+            </Link>
+          </div>
+
+          <p className="text-gray-600 text-[11px]">
+            Interested in contributing?{' '}
+            <a
+              href="https://github.com/d-burg/fusion-sim"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-cyan-600 hover:text-cyan-400 transition-colors"
+            >
+              View the project on GitHub
+            </a>
+          </p>
+
+          <p className="text-gray-600 text-[11px]">
+            &copy; 2026 Daniel Burgess and the Columbia Fusion Research Center &middot; v{__APP_VERSION__}
+          </p>
+        </footer>
       </div>
-
-      {/* Footer */}
-      <footer className="mt-12 max-w-3xl w-full text-center space-y-4">
-        {/* Disclaimer */}
-        <div className="px-5 py-3 rounded-lg border border-gray-800 bg-gray-900/50 text-gray-500 text-[11px] leading-relaxed">
-          <strong className="text-gray-400">Disclaimer:</strong> This simulator uses zero-dimensional
-          scaling laws and analytic approximations (0D power balance, IPB98(y,2) confinement scaling,
-          Cerfon-Freidberg equilibrium). Results are designed for{' '}
-          <em>qualitative educational use</em> and should not be interpreted as engineering
-          predictions or used for reactor design.
-        </div>
-
-        {/* Links row */}
-        <div className="flex items-center justify-center gap-3 text-gray-600 text-xs">
-          <span>Open-source · Educational</span>
-          <span className="text-gray-700">·</span>
-          <Link
-            to="/bibliography"
-            className="text-cyan-600 hover:text-cyan-400 transition-colors"
-          >
-            Physics Bibliography
-          </Link>
-        </div>
-
-        {/* Contribute */}
-        <p className="text-gray-600 text-[11px]">
-          Interested in contributing?{' '}
-          <a
-            href="https://github.com/d-burg/fusion-sim"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-cyan-600 hover:text-cyan-400 transition-colors"
-          >
-            View the project on GitHub
-          </a>
-        </p>
-
-        {/* Attribution */}
-        <p className="text-gray-600 text-[11px]">
-          &copy; 2026 Daniel Burgess and the Columbia Fusion Research Center &middot; v{__APP_VERSION__}
-        </p>
-      </footer>
 
       {/* ─── Tutorial prompt overlay ─── */}
       {showTutorialPrompt && (
